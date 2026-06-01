@@ -11,6 +11,7 @@
 * **\`header_proxy.js\`**: Hides main header with a toggle button to reveal it for editing.
 * **\`heatmap_update_time.js\`**: Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 * **\`order_number_extractor.js\`**: Extracts 10xx/30xx orders from the issue description and lists them for quick copying.
+* **\`queue_alert.js\`**: Plays an alert sound when tickets are in the "Waiting for Triage" queue. Repeats every 30/5 seconds while tickets remain, with a toggle button and two modes (normal/aggressive).
 * **\`recovery_signal.js\`**: Adds a pulsing green indicator if the 'recovered' label is present on the issue.
 * **\`signature.js\`**: Adds a button to insert a standard signature in the Jira comment editor.
 * **\`ticket_list_highlighter.js\`**: Dynamically highlights rows in the Jira issue list when their status is "In Progress".
