@@ -8,13 +8,13 @@
 // @description Dynamically highlights rows in the Jira issue list when their status is "In Progress".
 // ==/UserScript==
 
-;(function () {
+; (function () {
     'use strict'
 
     // CONFIGURATION
     const STATUS_STYLES = {
         'In Progress': {
-            bg: 'var(--ds-background-information-subtle, rgba(0, 82, 204, 0.15))',
+            bg: 'rgba(0, 82, 204, 0.15)',
             border: 'var(--ds-border-information, #579DFF)'
         },
         'Pending': {
