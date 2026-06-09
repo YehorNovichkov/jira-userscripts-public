@@ -3,12 +3,12 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.7.0
+// @version     1.8.0
 // @author      oggmancuc
 // @description Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 // ==/UserScript==
 
-;(function () {
+; (function () {
     'use strict'
 
     // --- CONFIGURATION ---
@@ -128,7 +128,7 @@
                 customTimeEl = document.createElement('span')
                 customTimeEl.className = 'gm-heatmap-time'
                 nativeTimeEl.style.display = 'none'
-                ;(nativeTimeEl.parentElement || cell).appendChild(customTimeEl)
+                    ; (nativeTimeEl.parentElement || cell).appendChild(customTimeEl)
             }
 
             // --- Data Extraction ---
@@ -190,7 +190,15 @@
                     background-color: ${displayColor};
                     border-radius: 50%; margin-left: 6px;
                     box-shadow: 0 0 8px ${displayColor};
+                    cursor: pointer;
                 `
+                dot.title = 'Click to mark as read'
+                dot.addEventListener('click', (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setLastViewedTime(ticketId)
+                    processTimestamps() // Force immediate re-evaluation
+                })
                 customTimeEl.appendChild(dot)
             }
         })
