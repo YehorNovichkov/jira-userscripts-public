@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.0
+// @version     1.2.1
 // @author      oggmancuc
 // @description Dynamically highlights rows in the Jira issue list when their status is "In Progress".
 // ==/UserScript==
