@@ -1,9 +1,17 @@
-### Instalation
+### Installation
 
+**Manual Installation:**
 1. Install Tampermonkey/Violentmonkey or similar extension
 2. Create new script in extension's dashboard
 3. Paste the code of the script that you want to use from this repo
 4. Hit save and reload Jira tab
+
+**Install from GitHub URL (Auto-updating):**
+1. Navigate to the script you want to install in this repository on GitHub.
+2. Click the "Raw" button to get the raw URL of the script.
+3. In Tampermonkey, go to the "Utilities" tab.
+4. Paste the raw URL in the "Import from URL" field and click "Install".
+5. In the script's settings, check if the "Update URL" was correctly set to enable auto-updates.
 
 ### Scripts
 
