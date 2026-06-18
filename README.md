@@ -8,6 +8,7 @@
 ### Scripts
 
 * **\`bot_human_highlighter.js\`**: Visually separates monitoring alerts from human requests, and cleans up long subject lines.
+* **\`compact_ticket_table.js\`**: Makes the Jira service desk ticket list table more compact and allows hiding or resizing specific columns.
 * **\`header_proxy.js\`**: Hides main header with a toggle button to reveal it for editing.
 * **\`heatmap_update_time.js\`**: Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 * **\`order_number_extractor.js\`**: Extracts 10xx/30xx orders from the issue description and lists them for quick copying.
