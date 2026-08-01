@@ -3,17 +3,20 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.3.0
+// @version     1.4.0
 // @author      oggmancuc
 // @description Auto-expands the 'Log Work' modal and adds quick time buttons for logging.
 // ==/UserScript==
 
-;(function () {
+; (function () {
     'use strict'
 
     const TIME_OPTIONS = ['7m', '15m', '30m']
     const EXPAND_BTN_SELECTOR = 'button[data-testid*="log-work.next-button"]'
-    const TIME_SPENT_CONTAINER = '[data-testid="issue-transition.ui.modal.field-renderer.field.log-work-time-spent"]'
+    const TIME_SPENT_SELECTORS = [
+        '[data-testid="issue-transition.ui.modal.field-renderer.field.log-work-time-spent"]',
+        '[data-testid="issue.common.component.log-time-modal.modal.form.time-spent"]',
+    ]
 
     function log(msg, obj = '') {
         // Debug logs removed for production
@@ -41,14 +44,19 @@
     }
 
     function injectButtons(container) {
-        if (container.querySelector('.gm-quick-log-container')) {
-            return
+        const parentRow = container.parentElement
+        const targetWrapper = (parentRow && parentRow.querySelector('[data-testid*="time-remaining"]'))
+            ? parentRow
+            : container
+
+        if (targetWrapper.querySelector('.gm-quick-log-container') || targetWrapper.parentElement?.querySelector('.gm-quick-log-container')) {
+            return true
         }
 
-        const input = container.querySelector('input[type="text"]')
+        const input = container.querySelector('input[type="text"]') || container.querySelector('input')
         if (!input) {
             log("Container found, but couldn't find the <input> inside it yet.")
-            return
+            return false
         }
 
         // log('Target input found. Injecting buttons...');
@@ -86,15 +94,18 @@
             btnWrapper.appendChild(btn)
         })
 
-        // Insert after the label
-        const label = container.querySelector('label')
-        if (label) {
-            label.after(btnWrapper)
-            // log('Buttons injected after label.');
+        if (targetWrapper !== container) {
+            targetWrapper.before(btnWrapper)
         } else {
-            container.prepend(btnWrapper)
-            // log('Buttons injected at top of container (no label found).');
+            const label = container.querySelector('label')
+            if (label) {
+                label.after(btnWrapper)
+            } else {
+                container.prepend(btnWrapper)
+            }
         }
+
+        return true
     }
 
     function runLogic() {
@@ -116,28 +127,30 @@
         let attempts = 0
         const interval = setInterval(() => {
             attempts++
-            const container = document.querySelector(TIME_SPENT_CONTAINER)
+            const selectorStr = TIME_SPENT_SELECTORS.join(',')
+            const containers = document.querySelectorAll(selectorStr)
 
-            if (container) {
-                // log(`Time Spent container found after ${attempts} attempts.`);
-                injectButtons(container)
-                clearInterval(interval)
-            }
+            let injectedAll = containers.length > 0
+            containers.forEach((container) => {
+                if (!injectButtons(container)) {
+                    injectedAll = false
+                }
+            })
 
-            if (attempts > 30) {
-                // Give up after 3 seconds
-                // log('Timed out waiting for Time Spent container.');
+            if (injectedAll || attempts > 30) {
                 clearInterval(interval)
             }
         }, 100)
     }
 
+    const MATCH_SELECTOR = `${EXPAND_BTN_SELECTOR}, ${TIME_SPENT_SELECTORS.join(',')}`
+
     // Observe body for the modal appearing
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
             if (mutation.addedNodes.length) {
-                // Look for either the expand button or the container
-                if (document.querySelector(EXPAND_BTN_SELECTOR) || document.querySelector(TIME_SPENT_CONTAINER)) {
+                // Look for either the expand button or any time-spent container
+                if (document.querySelector(MATCH_SELECTOR)) {
                     // Disconnect briefly to avoid infinite loops if we modify the DOM
                     observer.disconnect()
                     runLogic()
@@ -154,3 +167,4 @@
     log('Script started. Watching for Jira modals...')
     observer.observe(document.body, { childList: true, subtree: true })
 })()
+
