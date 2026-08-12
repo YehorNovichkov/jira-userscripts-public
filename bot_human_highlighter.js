@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.0
+// @version     1.2.1
 // @author      oggmancuc
 // @description Visually separates monitoring alerts from human requests, and cleans up long subject lines.
 // ==/UserScript==
@@ -13,7 +13,7 @@
 
     // --- CONFIGURATION ---
     const BOT_NAMES = ['System', 'graylog']
-    const BOT_KEYWORDS = ['Checkmk', 'PROBLEM', 'Alert:', 'Critical:', 'OMS', 'Track time for meetings', 'Communication and collaboration with other teams']
+    const BOT_KEYWORDS = ['Checkmk', 'PROBLEM', 'Alert:', 'Critical:', 'OMS', 'Track time for meetings', 'Communication and collaboration with other teams', 'Monitoring and Dispatching', 'Servers maintenance']
 
 
     // --- PATTERNS TO STRIP ---
