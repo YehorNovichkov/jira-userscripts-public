@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.1
+// @version     1.2.2
 // @author      oggmancuc
 // @description Dynamically highlights rows in the Jira issue list when their status is "In Progress".
 // ==/UserScript==
@@ -31,7 +31,10 @@
         const statusCells = document.querySelectorAll('div[data-testid*="-status"]')
 
         statusCells.forEach((cell) => {
-            const row = cell.closest('div._1fjgglyw')
+            const row = cell.closest('div[role="row"]') ||
+                        cell.closest('.virtual-table-row') ||
+                        cell.closest('[data-vc*="row"]') ||
+                        cell.closest('div._1fjgglyw')
             if (!row) return
 
             const status = cell.textContent.trim()

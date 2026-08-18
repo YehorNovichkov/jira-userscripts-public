@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.8.0
+// @version     1.8.1
 // @author      oggmancuc
 // @description Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 // ==/UserScript==
@@ -139,7 +139,10 @@
             if (ticketIdMatch && ticketIdMatch[1]) {
                 ticketId = ticketIdMatch[1]
             } else {
-                const row = cell.closest('div._1fjgglyw')
+                const row = cell.closest('div[role="row"]') ||
+                            cell.closest('.virtual-table-row') ||
+                            cell.closest('[data-vc*="row"]') ||
+                            cell.closest('div._1fjgglyw')
                 if (row) {
                     const issueLink = row.querySelector('[data-issue-key]')
                     if (issueLink) {

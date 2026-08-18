@@ -38,21 +38,24 @@
     document.head.appendChild(style)
 
     function processQueue() {
-        const rows = document.querySelectorAll('div._1fjgglyw')
+        const summaryCells = document.querySelectorAll('div[data-testid*="-summary"]')
 
-        rows.forEach((row) => {
+        summaryCells.forEach((summaryEl) => {
+            const row = summaryEl.closest('div[role="row"]') ||
+                        summaryEl.closest('.virtual-table-row') ||
+                        summaryEl.closest('[data-vc*="row"]') ||
+                        summaryEl.closest('div._1fjgglyw')
+            if (!row) return
+
             if (row.dataset.gmCategorized) return
 
-            const summaryEl = row.querySelector('div[data-testid*="-summary"]')
             const reporterEl = row.querySelector('div[data-testid*="-reporter"]')
 
-            if (!summaryEl || !reporterEl) return
-
             const summaryText = summaryEl.textContent.trim()
-            const reporterText = reporterEl.textContent.trim()
+            const reporterText = reporterEl ? reporterEl.textContent.trim() : ''
 
             // Logic: Is it a bot?
-            const isBotReporter = BOT_NAMES.some((name) => reporterText.toLowerCase().includes(name.toLowerCase()))
+            const isBotReporter = reporterEl ? BOT_NAMES.some((name) => reporterText.toLowerCase().includes(name.toLowerCase())) : false
             const isBotSummary = BOT_KEYWORDS.some((word) => summaryText.includes(word))
 
             const isBot = isBotReporter || isBotSummary
