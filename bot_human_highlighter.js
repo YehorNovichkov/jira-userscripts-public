@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.1
+// @version     1.2.2
 // @author      oggmancuc
 // @description Visually separates monitoring alerts from human requests, and cleans up long subject lines.
 // ==/UserScript==
@@ -42,9 +42,9 @@
 
         summaryCells.forEach((summaryEl) => {
             const row = summaryEl.closest('div[role="row"]') ||
-                        summaryEl.closest('.virtual-table-row') ||
-                        summaryEl.closest('[data-vc*="row"]') ||
-                        summaryEl.closest('div._1fjgglyw')
+                summaryEl.closest('.virtual-table-row') ||
+                summaryEl.closest('[data-vc*="row"]') ||
+                summaryEl.closest('div._1fjgglyw')
             if (!row) return
 
             if (row.dataset.gmCategorized) return
