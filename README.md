@@ -48,7 +48,7 @@
   </details>
 * **`recovery_signal.js`** (deprecated): Adds a pulsing green indicator if the 'recovered' label is present on the issue.
 * **`signature.js`**: Adds a button to insert a standard signature in the Jira comment editor.
-* **`starred_queues_bar.js`**: Duplicates starred queues into a neat, responsive horizontal bar in the queue header for fast one-click switching.
+* **`starred_queues_bar.js`**: Duplicates starred queues into a neat, responsive horizontal bar in the queue header for fast one-click switching. Features drag-to-reorder, local queue renaming, and single-row collapse with an expand toggle.
 * **`ticket_list_highlighter.js`**: Dynamically highlights rows in the Jira issue list when their status is "In Progress".
   <details>
     <summary>Preview</summary>

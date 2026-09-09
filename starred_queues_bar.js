@@ -3,19 +3,22 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.0
+// @version     1.2.0
 // @author      oggmancuc
-// @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header between the title and action buttons, wrapping only when items stop fitting horizontally.
+// @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header with drag-to-reorder, local renaming, and single-row expand/collapse.
 // ==/UserScript==
 
-;(function () {
+; (function () {
     'use strict'
 
     const BAR_ID = 'gm-starred-queues-bar'
     const STYLE_ID = 'gm-starred-queues-style'
     const STORAGE_KEY = 'gm-starred-queues-cache-v2'
+    const STORAGE_ORDER_KEY = 'gm-starred-queues-order-v1'
+    const STORAGE_RENAMES_KEY = 'gm-starred-queues-renames-v1'
+    const STORAGE_COLLAPSED_KEY = 'gm-starred-queues-collapsed-v1'
 
-    // Load & sanitize cache
+    // ── Storage Helpers ────────────────────────────────────────────────
     let cachedQueues = []
     try {
         const saved = localStorage.getItem(STORAGE_KEY)
@@ -36,7 +39,76 @@
                 })
             }
         }
-    } catch (_) {}
+    } catch (_) { }
+
+    let customOrder = []
+    try {
+        const saved = localStorage.getItem(STORAGE_ORDER_KEY)
+        if (saved) {
+            const parsed = JSON.parse(saved)
+            if (Array.isArray(parsed)) customOrder = parsed
+        }
+    } catch (_) { }
+
+    function saveCustomOrder(order) {
+        customOrder = order
+        try {
+            localStorage.setItem(STORAGE_ORDER_KEY, JSON.stringify(order))
+        } catch (_) { }
+    }
+
+    let customRenames = {}
+    try {
+        const saved = localStorage.getItem(STORAGE_RENAMES_KEY)
+        if (saved) {
+            const parsed = JSON.parse(saved)
+            if (parsed && typeof parsed === 'object') customRenames = parsed
+        }
+    } catch (_) { }
+
+    function saveCustomRenames() {
+        try {
+            localStorage.setItem(STORAGE_RENAMES_KEY, JSON.stringify(customRenames))
+        } catch (_) { }
+    }
+
+    let isBarCollapsed = true
+    try {
+        const saved = localStorage.getItem(STORAGE_COLLAPSED_KEY)
+        if (saved !== null) {
+            isBarCollapsed = saved === 'true'
+        } else {
+            isBarCollapsed = true
+        }
+    } catch (_) { }
+
+    function saveCollapsedState(collapsed) {
+        try {
+            localStorage.setItem(STORAGE_COLLAPSED_KEY, collapsed ? 'true' : 'false')
+        } catch (_) { }
+    }
+
+    function applyCustomOrder(queues) {
+        if (!customOrder || customOrder.length === 0) return queues
+        const orderMap = new Map()
+        customOrder.forEach((href, idx) => orderMap.set(href, idx))
+
+        return [...queues].sort((a, b) => {
+            const indexA = orderMap.has(a.href) ? orderMap.get(a.href) : 99999
+            const indexB = orderMap.has(b.href) ? orderMap.get(b.href) : 99999
+            if (indexA !== indexB) return indexA - indexB
+            return 0
+        })
+    }
+
+    function getRenderedKeys(queues) {
+        return queues.map(q => `${q.href}:${customRenames[q.href] || q.name}`).join('|')
+    }
+
+    // Drag & drop state
+    let draggedChip = null
+    let hasDragged = false
+    let dragStartTime = 0
 
     // ── CSS Injection ──────────────────────────────────────────────────
     function injectStyles() {
@@ -48,8 +120,7 @@
             #${BAR_ID} {
                 display: flex;
                 flex-direction: row;
-                flex-wrap: wrap; /* wraps to next line ONLY when items stop fitting horizontally */
-                align-items: center;
+                align-items: flex-start;
                 align-self: center;
                 gap: 4px 6px;
                 flex: 1 1 auto;
@@ -64,16 +135,77 @@
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                padding: 2px 4px 2px 0;
+                height: 24px;
+                padding: 0 4px 0 0;
                 color: var(--ds-icon-accent-yellow, #E2B203);
                 flex-shrink: 0;
+            }
+
+            .gm-chips-container {
+                display: flex;
+                flex-direction: row;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 4px 6px;
+                flex: 1 1 auto;
+                min-width: 0;
+                transition: max-height 0.2s cubic-bezier(0.2, 0, 0, 1);
+            }
+
+            /* Collapsed single row state */
+            #${BAR_ID}.gm-collapsed .gm-chips-container {
+                max-height: 24px;
+                overflow: hidden;
+            }
+
+            /* Expanded state */
+            #${BAR_ID}:not(.gm-collapsed) .gm-chips-container {
+                max-height: 600px;
+            }
+
+            /* Expand / Collapse toggle button */
+            .gm-bar-toggle-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                flex-shrink: 0;
+                margin-top: 1px;
+                cursor: pointer;
+                background: var(--ds-background-neutral-subtle, rgba(9, 30, 66, 0.04));
+                color: var(--ds-text-subtle, #626F86);
+                border: 1px solid var(--ds-border, rgba(9, 30, 66, 0.12));
+                padding: 0;
+                outline: none;
+                transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+            }
+
+            .gm-bar-toggle-btn:hover {
+                background: var(--ds-background-neutral, rgba(9, 30, 66, 0.08));
+                border-color: var(--ds-border-focused, #388BFF);
+                color: var(--ds-text, #172B4D);
+            }
+
+            .gm-bar-toggle-btn:active {
+                transform: scale(0.92);
+            }
+
+            .gm-bar-toggle-btn svg {
+                transition: transform 0.2s ease;
+            }
+
+            #${BAR_ID}:not(.gm-collapsed) .gm-bar-toggle-btn svg {
+                transform: rotate(180deg);
             }
 
             .gm-queue-chip {
                 display: inline-flex;
                 align-items: center;
-                gap: 6px;
-                padding: 2px 7px 2px 9px;
+                gap: 5px;
+                height: 24px;
+                padding: 0 7px 0 9px;
                 border-radius: 12px;
                 background: var(--ds-background-neutral-subtle, rgba(9, 30, 66, 0.04));
                 color: var(--ds-text, #172B4D);
@@ -81,9 +213,10 @@
                 font: var(--ds-font-body-UNSAFE_small, normal 500 12px/16px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
                 text-decoration: none !important;
                 white-space: nowrap;
-                flex-shrink: 0; /* Keep each chip intact; wrap to next row when out of horizontal space */
-                cursor: pointer;
-                transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+                flex-shrink: 0;
+                //cursor: grab;
+                box-sizing: border-box;
+                transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
             }
 
             .gm-queue-chip:hover {
@@ -95,7 +228,14 @@
             }
 
             .gm-queue-chip:active {
-                transform: translateY(0) scale(0.98);
+                //cursor: grabbing;
+            }
+
+            .gm-queue-chip.gm-dragging {
+                opacity: 0.35 !important;
+                border-style: dashed !important;
+                transform: scale(0.96);
+                //cursor: grabbing !important;
             }
 
             /* Active / selected queue */
@@ -119,6 +259,58 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+            }
+
+            /* Rename button */
+            .gm-rename-btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 14px;
+                height: 14px;
+                border-radius: 3px;
+                color: var(--ds-text-subtle, #626F86);
+                opacity: 0;
+                cursor: pointer;
+                padding: 0;
+                border: none;
+                background: transparent;
+                transition: opacity 0.15s ease, color 0.15s ease;
+                flex-shrink: 0;
+                margin: 0 -2px;
+            }
+
+            .gm-queue-chip:hover .gm-rename-btn {
+                opacity: 0.65;
+            }
+
+            .gm-rename-btn:hover {
+                opacity: 1 !important;
+                color: var(--ds-text, #172B4D) !important;
+            }
+
+            .gm-queue-chip.gm-active .gm-rename-btn {
+                color: rgba(255, 255, 255, 0.7);
+            }
+
+            .gm-queue-chip.gm-active .gm-rename-btn:hover {
+                color: #FFFFFF !important;
+            }
+
+            /* Inline rename input */
+            .gm-rename-input {
+                font: inherit;
+                font-size: 12px;
+                line-height: 16px;
+                height: 18px;
+                padding: 0 4px;
+                border: 1px solid var(--ds-border-focused, #388BFF);
+                border-radius: 4px;
+                background: var(--ds-background-input, #FFFFFF);
+                color: var(--ds-text, #172B4D);
+                outline: none;
+                box-sizing: border-box;
+                width: 110px;
             }
 
             /* Count badge */
@@ -175,6 +367,37 @@
             [data-theme*="dark"] .gm-queue-chip:not(.gm-active) .gm-queue-badge:not(.gm-badge-zero) {
                 background: rgba(255, 255, 255, 0.16);
                 color: #FFFFFF;
+            }
+
+            [data-color-mode="dark"] .gm-bar-toggle-btn,
+            [data-theme*="dark"] .gm-bar-toggle-btn {
+                background: rgba(255, 255, 255, 0.06);
+                border-color: rgba(255, 255, 255, 0.14);
+                color: #9FADBC;
+            }
+
+            [data-color-mode="dark"] .gm-bar-toggle-btn:hover,
+            [data-theme*="dark"] .gm-bar-toggle-btn:hover {
+                background: rgba(255, 255, 255, 0.12);
+                border-color: #579DFF;
+                color: #FFFFFF;
+            }
+
+            [data-color-mode="dark"] .gm-rename-btn,
+            [data-theme*="dark"] .gm-rename-btn {
+                color: #9FADBC;
+            }
+
+            [data-color-mode="dark"] .gm-rename-btn:hover,
+            [data-theme*="dark"] .gm-rename-btn:hover {
+                color: #FFFFFF !important;
+            }
+
+            [data-color-mode="dark"] .gm-rename-input,
+            [data-theme*="dark"] .gm-rename-input {
+                background: #22272B;
+                border-color: #579DFF;
+                color: #E2E8F0;
             }
         `
         document.head.appendChild(style)
@@ -266,8 +489,8 @@
 
             // Title
             const titleSpan = link.querySelector('span[style*="-webkit-line-clamp"]') ||
-                              link.querySelector('span') ||
-                              link
+                link.querySelector('span') ||
+                link
             const name = titleSpan ? titleSpan.textContent.trim() : ''
             if (!name) continue
 
@@ -279,7 +502,7 @@
 
             // Queue issue count badge
             const badgeEl = item.querySelector('[data-is-queue-issue-count-badge="true"]') ||
-                            item.querySelector('[class*="badge"]')
+                item.querySelector('[class*="badge"]')
             const count = badgeEl ? badgeEl.textContent.trim() : '0'
 
             queues.push({
@@ -293,7 +516,7 @@
             cachedQueues = queues
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(queues))
-            } catch (_) {}
+            } catch (_) { }
             return queues
         }
 
@@ -363,10 +586,121 @@
         }
     }
 
+    // ── Check Bar Overflow & Toggle Button Visibility ─────────────────
+    function checkOverflow(bar) {
+        if (!bar) return
+        const container = bar.querySelector('.gm-chips-container')
+        const toggleBtn = bar.querySelector('.gm-bar-toggle-btn')
+        if (!container || !toggleBtn) return
+
+        const hasMultipleRows = container.scrollHeight > 26
+        const isCollapsed = bar.classList.contains('gm-collapsed')
+
+        if (hasMultipleRows || !isCollapsed) {
+            toggleBtn.style.display = 'inline-flex'
+        } else {
+            toggleBtn.style.display = 'none'
+        }
+    }
+
+    // ── Inline Rename Handler ──────────────────────────────────────────
+    function startRename(chip, q) {
+        const titleSpan = chip.querySelector('.gm-queue-title')
+        if (!titleSpan || chip.querySelector('.gm-rename-input')) return
+
+        chip.setAttribute('draggable', 'false')
+        const currentName = customRenames[q.href] || q.name
+
+        const input = document.createElement('input')
+        input.type = 'text'
+        input.className = 'gm-rename-input'
+        input.value = currentName
+        input.placeholder = q.name
+        input.maxLength = 50
+
+        // Temporarily hide titleSpan and renameBtn
+        titleSpan.style.display = 'none'
+        const renameBtn = chip.querySelector('.gm-rename-btn')
+        if (renameBtn) renameBtn.style.display = 'none'
+
+        chip.insertBefore(input, titleSpan)
+        input.focus()
+        input.select()
+
+        let finished = false
+
+        function finish(save) {
+            if (finished) return
+            finished = true
+
+            if (save) {
+                const val = input.value.trim()
+                if (!val || val === q.name) {
+                    delete customRenames[q.href]
+                } else {
+                    customRenames[q.href] = val
+                }
+                saveCustomRenames()
+            }
+
+            const effectiveName = customRenames[q.href] || q.name
+            titleSpan.textContent = effectiveName
+            titleSpan.style.display = ''
+            if (renameBtn) renameBtn.style.display = ''
+
+            const badge = chip.querySelector('.gm-queue-badge')
+            const countText = badge ? badge.textContent : (q.count || '0')
+
+            if (customRenames[q.href]) {
+                chip.classList.add('gm-is-renamed')
+                chip.title = `${effectiveName} (original: "${q.name}") (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+            } else {
+                chip.classList.remove('gm-is-renamed')
+                chip.title = `${effectiveName} (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+            }
+
+            input.remove()
+            chip.setAttribute('draggable', 'true')
+
+            const bar = document.getElementById(BAR_ID)
+            if (bar) {
+                const queues = cachedQueues.length > 0 ? applyCustomOrder(cachedQueues) : []
+                bar.dataset.renderedKeys = getRenderedKeys(queues)
+            }
+        }
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault()
+                e.stopPropagation()
+                finish(true)
+            } else if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                finish(false)
+            }
+        })
+
+        input.addEventListener('blur', () => {
+            finish(true)
+        })
+
+        input.addEventListener('click', (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+        })
+
+        input.addEventListener('mousedown', (e) => {
+            e.stopPropagation()
+        })
+    }
+
     // ── Build or Update the Horizontal Bar ──────────────────────────────
     function updateOrMountBar() {
-        const queues = getStarredQueuesFromDOM() || (cachedQueues.length > 0 ? cachedQueues : null)
-        if (!queues || queues.length === 0) return
+        const rawQueues = getStarredQueuesFromDOM() || (cachedQueues.length > 0 ? cachedQueues : null)
+        if (!rawQueues || rawQueues.length === 0) return
+
+        const queues = applyCustomOrder(rawQueues)
 
         injectStyles()
 
@@ -374,19 +708,23 @@
         if (!bar) {
             bar = document.createElement('div')
             bar.id = BAR_ID
+            if (isBarCollapsed) {
+                bar.classList.add('gm-collapsed')
+            }
         }
 
         const mounted = mountBarInHeader(bar)
         if (!mounted) return
 
-        // Compare if we need full rebuild of chips or just an update
-        const currentKeys = queues.map(q => `${q.href}:${q.name}`).join('|')
-        if (bar.dataset.renderedKeys !== currentKeys) {
-            bar.innerHTML = ''
-            bar.dataset.renderedKeys = currentKeys
+        // Prevent destructive re-render while dragging or actively renaming
+        if (draggedChip || bar.querySelector('.gm-rename-input')) {
+            return
+        }
 
-            // Compact Prefix Star Icon
-            const prefix = document.createElement('div')
+        // Ensure inner skeleton: prefix, chipsContainer, toggleBtn
+        let prefix = bar.querySelector('.gm-bar-prefix')
+        if (!prefix) {
+            prefix = document.createElement('div')
             prefix.className = 'gm-bar-prefix'
             prefix.title = 'Starred Queues'
             prefix.innerHTML = `
@@ -395,19 +733,98 @@
                 </svg>
             `
             bar.appendChild(prefix)
+        }
+
+        let chipsContainer = bar.querySelector('.gm-chips-container')
+        if (!chipsContainer) {
+            chipsContainer = document.createElement('div')
+            chipsContainer.className = 'gm-chips-container'
+            bar.appendChild(chipsContainer)
+        }
+
+        let toggleBtn = bar.querySelector('.gm-bar-toggle-btn')
+        if (!toggleBtn) {
+            toggleBtn = document.createElement('button')
+            toggleBtn.type = 'button'
+            toggleBtn.className = 'gm-bar-toggle-btn'
+            toggleBtn.title = isBarCollapsed ? 'Reveal full starred queues bar' : 'Collapse starred queues bar to one row'
+            toggleBtn.setAttribute('aria-expanded', isBarCollapsed ? 'false' : 'true')
+            toggleBtn.innerHTML = `
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
+                    <path d="M1.646 5.646a.5.5 0 0 1 .708 0L8 11.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
+                </svg>
+            `
+            toggleBtn.addEventListener('click', (e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                isBarCollapsed = !isBarCollapsed
+                saveCollapsedState(isBarCollapsed)
+                if (isBarCollapsed) {
+                    bar.classList.add('gm-collapsed')
+                    toggleBtn.title = 'Reveal full starred queues bar'
+                    toggleBtn.setAttribute('aria-expanded', 'false')
+                } else {
+                    bar.classList.remove('gm-collapsed')
+                    toggleBtn.title = 'Collapse starred queues bar to one row'
+                    toggleBtn.setAttribute('aria-expanded', 'true')
+                }
+                checkOverflow(bar)
+            })
+            bar.appendChild(toggleBtn)
+
+            if (window.ResizeObserver) {
+                const ro = new ResizeObserver(() => checkOverflow(bar))
+                ro.observe(chipsContainer)
+            } else {
+                window.addEventListener('resize', () => checkOverflow(bar))
+            }
+        }
+
+        // Compare if we need full rebuild of chips or just an in-place update
+        const currentKeys = getRenderedKeys(queues)
+        if (bar.dataset.renderedKeys !== currentKeys) {
+            chipsContainer.innerHTML = ''
+            bar.dataset.renderedKeys = currentKeys
 
             for (const q of queues) {
                 const chip = document.createElement('a')
                 chip.className = 'gm-queue-chip'
                 chip.href = q.href
                 chip.dataset.href = q.href
-                chip.title = `${q.name} (${q.count || '0'})`
+                chip.setAttribute('draggable', 'true')
 
+                const displayName = customRenames[q.href] || q.name
+                if (customRenames[q.href]) {
+                    chip.classList.add('gm-is-renamed')
+                    chip.title = `${displayName} (original: "${q.name}") (${q.count || '0'})\nDouble-click or ✎ to rename • Drag to reorder`
+                } else {
+                    chip.title = `${displayName} (${q.count || '0'})\nDouble-click or ✎ to rename • Drag to reorder`
+                }
+
+                // Title label
                 const titleSpan = document.createElement('span')
                 titleSpan.className = 'gm-queue-title'
-                titleSpan.textContent = q.name
+                titleSpan.textContent = displayName
                 chip.appendChild(titleSpan)
 
+                // Hover rename button
+                const renameBtn = document.createElement('button')
+                renameBtn.type = 'button'
+                renameBtn.className = 'gm-rename-btn'
+                renameBtn.title = 'Rename button locally'
+                renameBtn.innerHTML = `
+                    <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor">
+                        <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.806 2.016 2.016-.806-1.21-1.21z"/>
+                    </svg>
+                `
+                renameBtn.addEventListener('click', (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    startRename(chip, q)
+                })
+                chip.appendChild(renameBtn)
+
+                // Issue count badge
                 const badgeSpan = document.createElement('span')
                 badgeSpan.className = 'gm-queue-badge'
                 badgeSpan.textContent = q.count || '0'
@@ -416,14 +833,84 @@
                 }
                 chip.appendChild(badgeSpan)
 
-                // Interactivity: trigger native sidebar click if available, else navigate
+                // Double click triggers rename
+                chip.addEventListener('dblclick', (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    startRename(chip, q)
+                })
+
+                // Drag and Drop (reorder)
+                chip.addEventListener('dragstart', (e) => {
+                    if (chip.querySelector('.gm-rename-input')) {
+                        e.preventDefault()
+                        return
+                    }
+                    draggedChip = chip
+                    hasDragged = true
+                    dragStartTime = Date.now()
+                    chip.classList.add('gm-dragging')
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', chip.dataset.href || '')
+                })
+
+                chip.addEventListener('dragover', (e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    if (!draggedChip || draggedChip === chip) return
+
+                    const container = chip.parentElement
+                    if (!container) return
+
+                    const rect = chip.getBoundingClientRect()
+                    const midX = rect.left + rect.width / 2
+
+                    if (e.clientX < midX) {
+                        if (chip.previousElementSibling !== draggedChip) {
+                            container.insertBefore(draggedChip, chip)
+                        }
+                    } else {
+                        if (chip.nextElementSibling !== draggedChip) {
+                            container.insertBefore(draggedChip, chip.nextSibling)
+                        }
+                    }
+                })
+
+                chip.addEventListener('drop', (e) => {
+                    e.preventDefault()
+                })
+
+                chip.addEventListener('dragend', () => {
+                    if (draggedChip) {
+                        draggedChip.classList.remove('gm-dragging')
+                        draggedChip = null
+                    }
+                    const container = bar.querySelector('.gm-chips-container')
+                    if (container) {
+                        const newOrder = Array.from(container.querySelectorAll('.gm-queue-chip'))
+                            .map(c => c.dataset.href)
+                            .filter(Boolean)
+                        saveCustomOrder(newOrder)
+                        bar.dataset.renderedKeys = getRenderedKeys(applyCustomOrder(queues))
+                    }
+                    setTimeout(() => {
+                        hasDragged = false
+                    }, 100)
+                })
+
+                // Click navigation: trigger native sidebar click if available, else navigate
                 chip.addEventListener('click', (e) => {
+                    if (hasDragged || (Date.now() - dragStartTime < 250 && hasDragged)) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        return
+                    }
                     if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) {
                         return // Native open-in-new-tab
                     }
 
                     // Optimistic active highlight
-                    document.querySelectorAll('.gm-queue-chip').forEach(c => c.classList.remove('gm-active'))
+                    chipsContainer.querySelectorAll('.gm-queue-chip').forEach(c => c.classList.remove('gm-active'))
                     chip.classList.add('gm-active')
 
                     // Find matching sidebar link to trigger Jira client-side SPA routing
@@ -436,13 +923,13 @@
                     }
                 })
 
-                bar.appendChild(chip)
+                chipsContainer.appendChild(chip)
             }
         }
 
         // In-place update of active state & badges
         for (const q of queues) {
-            const chip = bar.querySelector(`.gm-queue-chip[data-href="${q.href}"]`)
+            const chip = chipsContainer.querySelector(`.gm-queue-chip[data-href="${q.href}"]`)
             if (!chip) continue
 
             // Active state
@@ -460,7 +947,12 @@
                 const countText = q.count || '0'
                 if (badge.textContent !== countText) {
                     badge.textContent = countText
-                    chip.title = `${q.name} (${countText})`
+                    const displayName = customRenames[q.href] || q.name
+                    if (customRenames[q.href]) {
+                        chip.title = `${displayName} (original: "${q.name}") (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+                    } else {
+                        chip.title = `${displayName} (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+                    }
                 }
                 if (countText === '0') {
                     badge.classList.add('gm-badge-zero')
@@ -469,6 +961,8 @@
                 }
             }
         }
+
+        checkOverflow(bar)
     }
 
     // ── Debounce Helper ────────────────────────────────────────────────
