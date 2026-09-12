@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.1
+// @version     1.2.2
 // @author      oggmancuc
 // @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header with drag-to-reorder, local renaming, and single-row expand/collapse.
 // ==/UserScript==
@@ -261,41 +261,6 @@
                 white-space: nowrap;
             }
 
-            /* Rename button */
-            .gm-rename-btn {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                width: 14px;
-                height: 14px;
-                border-radius: 3px;
-                color: var(--ds-text-subtle, #626F86);
-                opacity: 0;
-                cursor: pointer;
-                padding: 0;
-                border: none;
-                background: transparent;
-                transition: opacity 0.15s ease, color 0.15s ease;
-                flex-shrink: 0;
-                margin: 0 -2px;
-            }
-
-            .gm-queue-chip:hover .gm-rename-btn {
-                opacity: 0.65;
-            }
-
-            .gm-rename-btn:hover {
-                opacity: 1 !important;
-                color: var(--ds-text, #172B4D) !important;
-            }
-
-            .gm-queue-chip.gm-active .gm-rename-btn {
-                color: rgba(255, 255, 255, 0.7);
-            }
-
-            .gm-queue-chip.gm-active .gm-rename-btn:hover {
-                color: #FFFFFF !important;
-            }
 
             /* Inline rename input */
             .gm-rename-input {
@@ -383,15 +348,6 @@
                 color: #FFFFFF;
             }
 
-            [data-color-mode="dark"] .gm-rename-btn,
-            [data-theme*="dark"] .gm-rename-btn {
-                color: #9FADBC;
-            }
-
-            [data-color-mode="dark"] .gm-rename-btn:hover,
-            [data-theme*="dark"] .gm-rename-btn:hover {
-                color: #FFFFFF !important;
-            }
 
             [data-color-mode="dark"] .gm-rename-input,
             [data-theme*="dark"] .gm-rename-input {
@@ -649,10 +605,8 @@
         input.placeholder = q.name
         input.maxLength = 50
 
-        // Temporarily hide titleSpan and renameBtn
+        // Temporarily hide titleSpan
         titleSpan.style.display = 'none'
-        const renameBtn = chip.querySelector('.gm-rename-btn')
-        if (renameBtn) renameBtn.style.display = 'none'
 
         chip.insertBefore(input, titleSpan)
         input.focus()
@@ -677,17 +631,16 @@
             const effectiveName = customRenames[q.href] || q.name
             titleSpan.textContent = effectiveName
             titleSpan.style.display = ''
-            if (renameBtn) renameBtn.style.display = ''
 
             const badge = chip.querySelector('.gm-queue-badge')
             const countText = badge ? badge.textContent : (q.count || '0')
 
             if (customRenames[q.href]) {
                 chip.classList.add('gm-is-renamed')
-                chip.title = `${effectiveName} (original: "${q.name}") (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+                chip.title = `${effectiveName} (original: "${q.name}") (${countText})\nDouble-click to rename • Drag to reorder`
             } else {
                 chip.classList.remove('gm-is-renamed')
-                chip.title = `${effectiveName} (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+                chip.title = `${effectiveName} (${countText})\nDouble-click to rename • Drag to reorder`
             }
 
             input.remove()
@@ -832,9 +785,9 @@
                 const displayName = customRenames[q.href] || q.name
                 if (customRenames[q.href]) {
                     chip.classList.add('gm-is-renamed')
-                    chip.title = `${displayName} (original: "${q.name}") (${q.count || '0'})\nDouble-click or ✎ to rename • Drag to reorder`
+                    chip.title = `${displayName} (original: "${q.name}") (${q.count || '0'})\nDouble-click to rename • Drag to reorder`
                 } else {
-                    chip.title = `${displayName} (${q.count || '0'})\nDouble-click or ✎ to rename • Drag to reorder`
+                    chip.title = `${displayName} (${q.count || '0'})\nDouble-click to rename • Drag to reorder`
                 }
 
                 // Title label
@@ -842,23 +795,6 @@
                 titleSpan.className = 'gm-queue-title'
                 titleSpan.textContent = displayName
                 chip.appendChild(titleSpan)
-
-                // Hover rename button
-                const renameBtn = document.createElement('button')
-                renameBtn.type = 'button'
-                renameBtn.className = 'gm-rename-btn'
-                renameBtn.title = 'Rename button locally'
-                renameBtn.innerHTML = `
-                    <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor">
-                        <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.806 2.016 2.016-.806-1.21-1.21z"/>
-                    </svg>
-                `
-                renameBtn.addEventListener('click', (e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    startRename(chip, q)
-                })
-                chip.appendChild(renameBtn)
 
                 // Issue count badge
                 const badgeSpan = document.createElement('span')
@@ -985,9 +921,9 @@
                     badge.textContent = countText
                     const displayName = customRenames[q.href] || q.name
                     if (customRenames[q.href]) {
-                        chip.title = `${displayName} (original: "${q.name}") (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+                        chip.title = `${displayName} (original: "${q.name}") (${countText})\nDouble-click to rename • Drag to reorder`
                     } else {
-                        chip.title = `${displayName} (${countText})\nDouble-click or ✎ to rename • Drag to reorder`
+                        chip.title = `${displayName} (${countText})\nDouble-click to rename • Drag to reorder`
                     }
                 }
                 if (countText === '0') {
