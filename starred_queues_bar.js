@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.0
+// @version     1.2.1
 // @author      oggmancuc
 // @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header with drag-to-reorder, local renaming, and single-row expand/collapse.
 // ==/UserScript==
@@ -535,11 +535,42 @@
         }
     }
 
+    // ── Path / Route Validation ────────────────────────────────────────
+    /**
+     * Checks if current URL is a Jira Service Desk ticket queues page.
+     * Ticket queues URL pattern: ...atlassian.net/jira/servicedesk/projects/<space name>/queues...
+     * Prevents rendering on IT Portal, issue views, project settings, etc.
+     */
+    function isTicketQueuesPage() {
+        const pathname = window.location.pathname
+        // Standard ticket queues path:
+        // e.g. /jira/servicedesk/projects/<space name>/queues or /jira/servicedesk/projects/<space name>/queues/...
+        if (/\/servicedesk\/projects\/[^/]+\/queues(?:\/|$)/i.test(pathname)) {
+            return true
+        }
+        // Fallback for project root if queues are loaded at the space root level:
+        // /jira/servicedesk/projects/<space name> or /jira/servicedesk/projects/<space name>/
+        if (/\/servicedesk\/projects\/[^/]+\/?$/i.test(pathname)) {
+            return !!(
+                document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]') ||
+                document.querySelector('[data-testid*="jsm-queues-menu"]')
+            )
+        }
+        return false
+    }
+
+    function removeBar() {
+        const bar = document.getElementById(BAR_ID)
+        if (bar) {
+            bar.remove()
+        }
+    }
+
     // ── Mount Bar In Between Title & Action Buttons ─────────────────────
     function mountBarInHeader(bar) {
         // 1. Locate horizontal nav header or h1
         const nav = document.querySelector(
-            '[data-testid="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-vc="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"]'
+            '[data-testid="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-vc="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]'
         )
         const h1 = (nav ? nav.querySelector('h1') : null) || document.querySelector('h1')
         if (!h1) return false
@@ -697,6 +728,11 @@
 
     // ── Build or Update the Horizontal Bar ──────────────────────────────
     function updateOrMountBar() {
+        if (!isTicketQueuesPage()) {
+            removeBar()
+            return
+        }
+
         const rawQueues = getStarredQueuesFromDOM() || (cachedQueues.length > 0 ? cachedQueues : null)
         if (!rawQueues || rawQueues.length === 0) return
 
@@ -978,6 +1014,11 @@
 
     // ── SPA Navigation Listener ────────────────────────────────────────
     function handleLocationChange() {
+        if (!isTicketQueuesPage()) {
+            removeBar()
+            return
+        }
+
         const bar = document.getElementById(BAR_ID)
         if (bar) {
             bar.querySelectorAll('.gm-queue-chip').forEach(chip => {
@@ -1010,6 +1051,11 @@
 
     // ── MutationObserver ───────────────────────────────────────────────
     const observer = new MutationObserver((mutations) => {
+        if (!isTicketQueuesPage()) {
+            removeBar()
+            return
+        }
+
         let shouldUpdate = false
         for (const m of mutations) {
             if (m.type === 'childList') {
