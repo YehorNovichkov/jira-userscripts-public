@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.2
+// @version     1.3.0
 // @author      oggmancuc
 // @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header with drag-to-reorder, local renaming, and single-row expand/collapse.
 // ==/UserScript==
@@ -360,8 +360,198 @@
     }
 
     // ── Resilient extraction of Starred Queues ONLY ────────────────────
+    let lastAutoExpandAttempt = 0
+    function ensureQueuesSectionExpanded() {
+        const now = Date.now()
+        if (now - lastAutoExpandAttempt < 1200) return false
+
+        let triggerBtn = document.querySelector(
+            'button[data-testid*="jsm-queues-menu.ui.queues-menu.expandable-menu-item-trigger"], [data-testid*="jsm-queues-menu"] button'
+        )
+
+        if (!triggerBtn) {
+            const container = document.querySelector(
+                '[data-testid*="jsm-queues-menu.ui.queues-menu.expandable-menu-item-trigger"], [data-testid*="jsm-queues-menu"]'
+            )
+            if (container) {
+                triggerBtn = container.tagName === 'BUTTON' ? container : (container.querySelector('button, [role="button"]') || container)
+            }
+        }
+
+        if (!triggerBtn) {
+            const sideNav = document.getElementById('jira-page-layout-side-nav') || document.querySelector('nav[aria-label="Sidebar"], [data-testid="page-layout.sidebar"]')
+            if (sideNav) {
+                const buttons = sideNav.querySelectorAll('button, div[role="button"]')
+                for (const b of buttons) {
+                    if (b.textContent.trim() === 'Queues') {
+                        triggerBtn = b
+                        break
+                    }
+                }
+            }
+        }
+
+        if (triggerBtn) {
+            const expandedAttr = triggerBtn.getAttribute('aria-expanded') ||
+                triggerBtn.closest('[aria-expanded]')?.getAttribute('aria-expanded') ||
+                triggerBtn.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')
+
+            if (expandedAttr === 'false') {
+                lastAutoExpandAttempt = now
+                triggerBtn.click()
+                setTimeout(debouncedUpdate, 150)
+                setTimeout(debouncedUpdate, 400)
+                return true
+            }
+        }
+        return false
+    }
+
+    // ── Live Queue Counts API Fetcher ──────────────────────────────────
+    let isFetchingCounts = false
+    let lastCountsFetchTime = 0
+    let cachedServiceDeskId = null
+
+    async function fetchLiveQueueCounts(queues) {
+        if (!queues || queues.length === 0) return
+        const now = Date.now()
+        // Throttle API calls to at most once every 10 seconds
+        if (isFetchingCounts || (now - lastCountsFetchTime < 10000)) return
+
+        // Extract project key from queue URLs or current path
+        let projectKey = null
+        for (const q of queues) {
+            const m = q.href.match(/\/servicedesk\/projects\/([^/]+)/i)
+            if (m && m[1]) {
+                projectKey = m[1].toUpperCase()
+                break
+            }
+        }
+        if (!projectKey) {
+            const m = window.location.pathname.match(/\/servicedesk\/projects\/([^/]+)/i)
+            if (m && m[1]) projectKey = m[1].toUpperCase()
+        }
+        if (!projectKey) {
+            const m = window.location.pathname.match(/\/browse\/([A-Z0-9_]+)-\d+/i)
+            if (m && m[1]) projectKey = m[1].toUpperCase()
+        }
+        if (!projectKey) return
+
+        isFetchingCounts = true
+        lastCountsFetchTime = now
+
+        const contextPrefix = (typeof window.AJS !== 'undefined' && typeof window.AJS.contextPath === 'function')
+            ? window.AJS.contextPath()
+            : (window.location.pathname.startsWith('/jira/') ? '/jira' : '')
+
+        try {
+            // Step 1: Find serviceDeskId for project if not cached
+            if (!cachedServiceDeskId) {
+                let sdRes = await fetch(`${contextPrefix}/rest/servicedeskapi/servicedesk`, {
+                    headers: { 'Accept': 'application/json' }
+                })
+                if (!sdRes.ok && contextPrefix) {
+                    sdRes = await fetch('/rest/servicedeskapi/servicedesk', {
+                        headers: { 'Accept': 'application/json' }
+                    })
+                }
+                if (!sdRes.ok) throw new Error(`SD fetch failed: ${sdRes.status}`)
+                const sdData = await sdRes.json()
+                const values = sdData.values || []
+                const matchedSd = values.find(v => (v.projectKey && v.projectKey.toUpperCase() === projectKey))
+                if (matchedSd && matchedSd.id) {
+                    cachedServiceDeskId = matchedSd.id
+                }
+            }
+            if (!cachedServiceDeskId) return
+
+            // Step 2: Fetch queues with issue counts
+            let qRes = await fetch(`${contextPrefix}/rest/servicedeskapi/servicedesk/${cachedServiceDeskId}/queue?includeCount=true`, {
+                headers: { 'Accept': 'application/json' }
+            })
+            if (!qRes.ok && contextPrefix) {
+                qRes = await fetch(`/rest/servicedeskapi/servicedesk/${cachedServiceDeskId}/queue?includeCount=true`, {
+                    headers: { 'Accept': 'application/json' }
+                })
+            }
+            if (!qRes.ok) throw new Error(`Queue count fetch failed: ${qRes.status}`)
+            const qData = await qRes.json()
+            const queueItems = qData.values || []
+            if (queueItems.length === 0) return
+
+            // Create lookup map by ID and by normalized name
+            const countById = new Map()
+            const countByName = new Map()
+            for (const item of queueItems) {
+                if (item.issueCount !== undefined && item.issueCount !== null) {
+                    const cntStr = String(item.issueCount)
+                    if (item.id) countById.set(String(item.id), cntStr)
+                    if (item.name) countByName.set(item.name.trim().toLowerCase(), cntStr)
+                }
+            }
+
+            // Update queues in memory and update DOM badges
+            let anyUpdated = false
+            for (const q of cachedQueues) {
+                const idMatch = q.href.match(/\/queues\/(?:[^/]+\/)?(\d+)/i)
+                let freshCount = null
+                if (idMatch && countById.has(idMatch[1])) {
+                    freshCount = countById.get(idMatch[1])
+                } else if (countByName.has(q.name.trim().toLowerCase())) {
+                    freshCount = countByName.get(q.name.trim().toLowerCase())
+                }
+
+                if (freshCount !== null && q.count !== freshCount) {
+                    q.count = freshCount
+                    anyUpdated = true
+                }
+            }
+
+            if (anyUpdated) {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedQueues))
+                } catch (_) { }
+
+                // Update rendered chips in the DOM
+                const bar = document.getElementById(BAR_ID)
+                if (bar) {
+                    const chipsContainer = bar.querySelector('.gm-chips-container')
+                    if (chipsContainer) {
+                        for (const q of cachedQueues) {
+                            const chip = chipsContainer.querySelector(`.gm-queue-chip[data-href="${q.href}"]`)
+                            if (!chip) continue
+                            const badge = chip.querySelector('.gm-queue-badge')
+                            if (badge && q.count !== undefined) {
+                                badge.textContent = q.count
+                                if (q.count === '0') {
+                                    badge.classList.add('gm-badge-zero')
+                                } else {
+                                    badge.classList.remove('gm-badge-zero')
+                                }
+                                const displayName = customRenames[q.href] || q.name
+                                if (customRenames[q.href]) {
+                                    chip.title = `${displayName} (original: "${q.name}") (${q.count})\nDouble-click to rename • Drag to reorder`
+                                } else {
+                                    chip.title = `${displayName} (${q.count})\nDouble-click to rename • Drag to reorder`
+                                }
+                            }
+                        }
+                        checkOverflow(bar)
+                    }
+                }
+            }
+        } catch (_) {
+            // Silently fall back to cached counts
+        } finally {
+            isFetchingCounts = false
+        }
+    }
+
     function getStarredQueuesFromDOM() {
-        // Step 1: Find the Queues expandable menu container in sidebar
+        // Step 1: Ensure Queues section in sidebar is expanded even if sidebar is minimised
+        ensureQueuesSectionExpanded()
+
+        // Find the Queues expandable menu container in sidebar
         const queuesTrigger = document.querySelector(
             '[data-testid*="jsm-queues-menu.ui.queues-menu.expandable-menu-item-trigger"], [data-testid*="jsm-queues-menu"]'
         )
@@ -429,6 +619,7 @@
         const queues = []
         const seenHrefs = new Set()
         const seenNames = new Set()
+        let needsLiveCounts = false
 
         for (const item of listItems) {
             const link = item.querySelector('a[href*="/queues/"]')
@@ -459,13 +650,30 @@
             // Queue issue count badge
             const badgeEl = item.querySelector('[data-is-queue-issue-count-badge="true"]') ||
                 item.querySelector('[class*="badge"]')
-            const count = badgeEl ? badgeEl.textContent.trim() : '0'
+
+            let count = '0'
+            let hasLiveBadge = false
+            if (badgeEl && badgeEl.textContent.trim()) {
+                count = badgeEl.textContent.trim()
+                hasLiveBadge = true
+            } else {
+                // DOM has no badge displayed (not fully loaded / ticket page).
+                // Preserve previously known cached count for this queue if available!
+                const prev = cachedQueues.find(q => q.href === cleanHref)
+                if (prev && prev.count !== undefined && prev.count !== '') {
+                    count = prev.count
+                }
+            }
 
             queues.push({
                 href: cleanHref,
                 name,
                 count
             })
+
+            if (!hasLiveBadge) {
+                needsLiveCounts = true
+            }
         }
 
         if (queues.length > 0) {
@@ -473,6 +681,12 @@
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(queues))
             } catch (_) { }
+
+            // If any queue was missing live badges from DOM, trigger background API fetch
+            if (needsLiveCounts) {
+                fetchLiveQueueCounts(queues)
+            }
+
             return queues
         }
 
@@ -493,24 +707,34 @@
 
     // ── Path / Route Validation ────────────────────────────────────────
     /**
-     * Checks if current URL is a Jira Service Desk ticket queues page.
-     * Ticket queues URL pattern: ...atlassian.net/jira/servicedesk/projects/<space name>/queues...
-     * Prevents rendering on IT Portal, issue views, project settings, etc.
+     * Checks if current URL is a Jira Service Desk ticket queues or issue page.
+     * Prevents rendering on IT Portal, project settings, global pages, etc.
      */
     function isTicketQueuesPage() {
         const pathname = window.location.pathname
-        // Standard ticket queues path:
+        // 1. Standard ticket queues path:
         // e.g. /jira/servicedesk/projects/<space name>/queues or /jira/servicedesk/projects/<space name>/queues/...
         if (/\/servicedesk\/projects\/[^/]+\/queues(?:\/|$)/i.test(pathname)) {
             return true
         }
-        // Fallback for project root if queues are loaded at the space root level:
-        // /jira/servicedesk/projects/<space name> or /jira/servicedesk/projects/<space name>/
-        if (/\/servicedesk\/projects\/[^/]+\/?$/i.test(pathname)) {
+        // 2. Service Desk project issue view or project root:
+        // e.g. /jira/servicedesk/projects/<space name>/issues/... or /jira/servicedesk/projects/<space name>/
+        if (/\/servicedesk\/projects\/[^/]+(?:\/(?:issues(?:\/|$)|$|\?))/i.test(pathname)) {
             return !!(
                 document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]') ||
                 document.querySelector('[data-testid*="jsm-queues-menu"]')
             )
+        }
+        // 3. Browse issue view when within a JSM project context (JSM queues menu present in sidebar):
+        if (/\/browse\/[A-Z]+-\d+/i.test(pathname)) {
+            return !!(
+                document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]') ||
+                document.querySelector('[data-testid*="jsm-queues-menu"]')
+            )
+        }
+        // 4. Any page where the JSM queues menu trigger or JSM queues horizontal nav exists in the DOM:
+        if (document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"], [data-testid*="jsm-queues-menu"]')) {
+            return true
         }
         return false
     }
@@ -524,22 +748,91 @@
 
     // ── Mount Bar In Between Title & Action Buttons ─────────────────────
     function mountBarInHeader(bar) {
-        // 1. Locate horizontal nav header or h1
+        // 1. Locate horizontal nav header
         const nav = document.querySelector(
             '[data-testid="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-vc="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]'
         )
-        const h1 = (nav ? nav.querySelector('h1') : null) || document.querySelector('h1')
+
+        // 2. If nav exists, mount inside nav header
+        if (nav) {
+            const h1 = nav.querySelector('h1')
+            if (h1) {
+                const titleWrapper = h1.closest('div[class*="_16jlkb7n"]') || h1.parentElement
+                if (titleWrapper) {
+                    const rowContainer = titleWrapper.parentElement || nav
+                    let toolbarWrapper = null
+                    for (const child of rowContainer.children) {
+                        if (child === titleWrapper || child === bar) continue
+                        if (
+                            child.querySelector?.('#gm-queue-alert-toggle') ||
+                            child.querySelector?.('button[aria-label*="Star"], [data-is-favorite]') ||
+                            child.querySelector?.('button')
+                        ) {
+                            toolbarWrapper = child
+                            break
+                        }
+                    }
+
+                    titleWrapper.style.flexShrink = '0'
+                    if (toolbarWrapper) {
+                        toolbarWrapper.style.flexShrink = '0'
+                        if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
+                            rowContainer.insertBefore(bar, toolbarWrapper)
+                        }
+                    } else {
+                        if (titleWrapper.nextElementSibling !== bar || bar.parentElement !== rowContainer) {
+                            titleWrapper.insertAdjacentElement('afterend', bar)
+                        }
+                    }
+                    return true
+                }
+            }
+
+            // nav exists without an h1 (e.g. ticket view under queues)
+            const headingOrTitle = nav.querySelector('h2, h3, [role="heading"], div[class*="_16jlkb7n"], [data-component-selector="breadcrumbs-wrapper"]')
+            const rowContainer = (headingOrTitle ? headingOrTitle.parentElement : null) || nav.querySelector('div[style*="display: flex"], div') || nav
+            if (rowContainer) {
+                let toolbarWrapper = null
+                for (const child of rowContainer.children) {
+                    if (child === headingOrTitle || child === bar) continue
+                    if (child.querySelector?.('button')) {
+                        toolbarWrapper = child
+                        break
+                    }
+                }
+                if (toolbarWrapper) {
+                    if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
+                        rowContainer.insertBefore(bar, toolbarWrapper)
+                    }
+                } else {
+                    if (bar.parentElement !== rowContainer) {
+                        rowContainer.appendChild(bar)
+                    }
+                }
+                return true
+            }
+        }
+
+        // 3. Fallback: Sticky issue header (#jira-issue-header)
+        const issueHeader = document.querySelector('#jira-issue-header [data-component-selector="breadcrumbs-wrapper"]') ||
+            document.querySelector('#jira-issue-header')
+        if (issueHeader) {
+            const rowContainer = issueHeader.parentElement || issueHeader
+            if (bar.parentElement !== rowContainer) {
+                issueHeader.insertAdjacentElement('afterend', bar)
+            }
+            return true
+        }
+
+        // 4. Final fallback to h1, but avoid mounting inside elements hidden by header proxy
+        const h1 = document.querySelector('h1:not([data-testid*="issue-field-summary"])') || document.querySelector('h1')
         if (!h1) return false
 
-        // 2. Find the wrapper element containing the h1 title
         const titleWrapper = h1.closest('div[class*="_16jlkb7n"]') || h1.parentElement
         if (!titleWrapper) return false
-
-        // 3. Find the parent row containing title and action buttons
         const rowContainer = titleWrapper.parentElement
         if (!rowContainer) return false
 
-        // 4. Find the toolbar wrapper on the right (contains Star, Share, Alert buttons)
         let toolbarWrapper = null
         for (const child of rowContainer.children) {
             if (child === titleWrapper || child === bar) continue
@@ -553,14 +846,9 @@
             }
         }
 
-        // Prevent title or toolbar from shrinking awkwardly
         titleWrapper.style.flexShrink = '0'
         if (toolbarWrapper) {
             toolbarWrapper.style.flexShrink = '0'
-        }
-
-        // 5. Mount bar in between titleWrapper and toolbarWrapper
-        if (toolbarWrapper) {
             if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
                 rowContainer.insertBefore(bar, toolbarWrapper)
             }
@@ -686,7 +974,16 @@
             return
         }
 
-        const rawQueues = getStarredQueuesFromDOM() || (cachedQueues.length > 0 ? cachedQueues : null)
+        // Proactively ensure Queues menu section is expanded
+        ensureQueuesSectionExpanded()
+
+        let rawQueues = getStarredQueuesFromDOM()
+        if (!rawQueues || rawQueues.length === 0) {
+            if (cachedQueues.length > 0) {
+                rawQueues = cachedQueues
+                fetchLiveQueueCounts(rawQueues)
+            }
+        }
         if (!rawQueues || rawQueues.length === 0) return
 
         const queues = applyCustomOrder(rawQueues)
@@ -771,7 +1068,7 @@
 
         // Compare if we need full rebuild of chips or just an in-place update
         const currentKeys = getRenderedKeys(queues)
-        if (bar.dataset.renderedKeys !== currentKeys) {
+        if (bar.dataset.renderedKeys !== currentKeys || chipsContainer.children.length === 0) {
             chipsContainer.innerHTML = ''
             bar.dataset.renderedKeys = currentKeys
 
@@ -955,6 +1252,8 @@
             return
         }
 
+        ensureQueuesSectionExpanded()
+
         const bar = document.getElementById(BAR_ID)
         if (bar) {
             bar.querySelectorAll('.gm-queue-chip').forEach(chip => {
@@ -1004,8 +1303,8 @@
                             continue
                         }
                         if (
-                            node.querySelector?.('[data-testid*="horizontal-nav"], [data-testid*="jsm-queues-menu"], [role="group"], [data-is-queue-issue-count-badge]') ||
-                            node.matches?.('[data-testid*="horizontal-nav"], [data-testid*="jsm-queues-menu"], [role="group"], [data-is-queue-issue-count-badge]')
+                            node.querySelector?.('[data-testid*="horizontal-nav"], [data-testid*="jsm-queues-menu"], [role="group"], [data-is-queue-issue-count-badge], #jira-issue-header, [data-testid*="issue.views"]') ||
+                            node.matches?.('[data-testid*="horizontal-nav"], [data-testid*="jsm-queues-menu"], [role="group"], [data-is-queue-issue-count-badge], #jira-issue-header, [data-testid*="issue.views"]')
                         ) {
                             shouldUpdate = true
                             break
@@ -1016,11 +1315,13 @@
             if (shouldUpdate) break
         }
 
-        if (!document.getElementById(BAR_ID)) {
+        const bar = document.getElementById(BAR_ID)
+        if (!bar || bar.querySelectorAll('.gm-queue-chip').length === 0) {
             shouldUpdate = true
         }
 
         if (shouldUpdate) {
+            ensureQueuesSectionExpanded()
             debouncedUpdate()
         }
     })
