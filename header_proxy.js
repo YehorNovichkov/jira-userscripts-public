@@ -3,9 +3,9 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.6.0
+// @version     1.7.0
 // @author      oggmancuc
-// @description Hides main header with a toggle button to reveal it for editing.
+// @description Hides main header with a toggle button to reveal it for editing, and hides clutter panels (Similar requests, Alert link).
 // ==/UserScript==
 
 ;(function () {
@@ -18,7 +18,17 @@
         /* When 'gm-hide-header' class is on body, hide the original elements */
         body.gm-hide-header [data-testid="issue-field-summary.ui.issue-field-summary-inline-edit--container"],
         body.gm-hide-header .css-bt2fdh,
-        body.gm-hide-header [data-testid="issue-view-foundation.quick-add.quick-add-items-container"] {
+        body.gm-hide-header [data-testid="issue-view-foundation.quick-add.quick-add-items-container"],
+        /* Clutter panels: Similar requests & Alert link */
+        body.gm-hide-header .gm-hidden-clutter,
+        body.gm-hide-header div.css-rjtezs:has([id*="smart-related-issues-panel"]),
+        body.gm-hide-header div.css-rjtezs:has([data-testid*="smart-related-issues-panel"]),
+        body.gm-hide-header div:has(> div > div > [id*="smart-related-issues-panel"]),
+        body.gm-hide-header [id*="smart-related-issues-panel"],
+        body.gm-hide-header [data-testid*="smart-related-issues-panel"],
+        body.gm-hide-header div.css-rjtezs:has([data-testid*="scope-Alert link"]),
+        body.gm-hide-header div:has(> [data-testid*="scope-Alert link"]),
+        body.gm-hide-header [data-testid*="scope-Alert link"] {
             display: none !important;
         }
 
@@ -35,6 +45,31 @@
     const STICKY_HEADER_SELECTOR = '#jira-issue-header [data-component-selector="breadcrumbs-wrapper"]'
     const REAL_SUMMARY_H1 = 'h1[data-testid="issue.views.issue-base.foundation.summary.heading"]'
     const REAL_LINK_BTN = 'button[data-testid="issue.issue-view.views.issue-base.foundation.quick-add.quick-add-item.link-issue"]'
+
+    function hideClutterPanels() {
+        // 1. Similar requests panel
+        const similarTitle = document.getElementById('smart-related-issues-panel.header.title') ||
+            document.querySelector('[data-testid*="smart-related-issues-panel"], [id*="smart-related-issues-panel"]')
+        if (similarTitle) {
+            const panel = similarTitle.closest('.css-rjtezs') ||
+                similarTitle.parentElement?.parentElement?.parentElement?.parentElement ||
+                similarTitle.closest('div')
+            if (panel && !panel.classList.contains('gm-hidden-clutter')) {
+                panel.classList.add('gm-hidden-clutter')
+            }
+        }
+
+        // 2. Alert link panel
+        const alertLink = document.querySelector(
+            '[data-testid="issue.views.issue-base.content.web-links.top-container.scope-Alert link"], [data-testid*="scope-Alert link"], [aria-label="Alert link section"]'
+        )
+        if (alertLink) {
+            const panel = alertLink.closest('.css-rjtezs') || alertLink.parentElement || alertLink
+            if (panel && !panel.classList.contains('gm-hidden-clutter')) {
+                panel.classList.add('gm-hidden-clutter')
+            }
+        }
+    }
 
     function createProxyHeader() {
         const container = document.createElement('div')
@@ -111,6 +146,8 @@
     }
 
     function sync() {
+        hideClutterPanels()
+
         const anchor = document.querySelector(STICKY_HEADER_SELECTOR)
         if (!anchor) return
 
