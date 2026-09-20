@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.3.0
+// @version     1.3.1
 // @author      oggmancuc
 // @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header with drag-to-reorder, local renaming, and single-row expand/collapse.
 // ==/UserScript==
@@ -355,6 +355,26 @@
                 border-color: #579DFF;
                 color: #E2E8F0;
             }
+
+            /* Sticky Issue Header layout when mounted in ticket view */
+            #jira-issue-header {
+                display: flex !important;
+                flex-direction: column !important;
+            }
+
+            #jira-issue-header #${BAR_ID} {
+                width: 100%;
+                align-self: stretch;
+                margin: 2px 0 2px 0;
+                padding: 3px 12px 3px 12px;
+                border-bottom: 1px solid var(--ds-border, rgba(9, 30, 66, 0.08));
+                box-sizing: border-box;
+            }
+
+            [data-color-mode="dark"] #jira-issue-header #${BAR_ID},
+            [data-theme*="dark"] #jira-issue-header #${BAR_ID} {
+                border-bottom-color: rgba(255, 255, 255, 0.08);
+            }
         `
         document.head.appendChild(style)
     }
@@ -410,13 +430,13 @@
     // ── Live Queue Counts API Fetcher ──────────────────────────────────
     let isFetchingCounts = false
     let lastCountsFetchTime = 0
-    let cachedServiceDeskId = null
+    const serviceDeskIdMap = new Map()
 
     async function fetchLiveQueueCounts(queues) {
         if (!queues || queues.length === 0) return
         const now = Date.now()
-        // Throttle API calls to at most once every 10 seconds
-        if (isFetchingCounts || (now - lastCountsFetchTime < 10000)) return
+        // Throttle API calls to at most once every 5 seconds
+        if (isFetchingCounts || (now - lastCountsFetchTime < 5000)) return
 
         // Extract project key from queue URLs or current path
         let projectKey = null
@@ -446,7 +466,8 @@
 
         try {
             // Step 1: Find serviceDeskId for project if not cached
-            if (!cachedServiceDeskId) {
+            let serviceDeskId = serviceDeskIdMap.get(projectKey)
+            if (!serviceDeskId) {
                 let sdRes = await fetch(`${contextPrefix}/rest/servicedeskapi/servicedesk`, {
                     headers: { 'Accept': 'application/json' }
                 })
@@ -460,17 +481,18 @@
                 const values = sdData.values || []
                 const matchedSd = values.find(v => (v.projectKey && v.projectKey.toUpperCase() === projectKey))
                 if (matchedSd && matchedSd.id) {
-                    cachedServiceDeskId = matchedSd.id
+                    serviceDeskId = matchedSd.id
+                    serviceDeskIdMap.set(projectKey, serviceDeskId)
                 }
             }
-            if (!cachedServiceDeskId) return
+            if (!serviceDeskId) return
 
             // Step 2: Fetch queues with issue counts
-            let qRes = await fetch(`${contextPrefix}/rest/servicedeskapi/servicedesk/${cachedServiceDeskId}/queue?includeCount=true`, {
+            let qRes = await fetch(`${contextPrefix}/rest/servicedeskapi/servicedesk/${serviceDeskId}/queue?includeCount=true`, {
                 headers: { 'Accept': 'application/json' }
             })
             if (!qRes.ok && contextPrefix) {
-                qRes = await fetch(`/rest/servicedeskapi/servicedesk/${cachedServiceDeskId}/queue?includeCount=true`, {
+                qRes = await fetch(`/rest/servicedeskapi/servicedesk/${serviceDeskId}/queue?includeCount=true`, {
                     headers: { 'Accept': 'application/json' }
                 })
             }
@@ -492,18 +514,22 @@
 
             // Update queues in memory and update DOM badges
             let anyUpdated = false
-            for (const q of cachedQueues) {
-                const idMatch = q.href.match(/\/queues\/(?:[^/]+\/)?(\d+)/i)
-                let freshCount = null
-                if (idMatch && countById.has(idMatch[1])) {
-                    freshCount = countById.get(idMatch[1])
-                } else if (countByName.has(q.name.trim().toLowerCase())) {
-                    freshCount = countByName.get(q.name.trim().toLowerCase())
-                }
+            const targetLists = [cachedQueues, queues]
+            for (const list of targetLists) {
+                if (!Array.isArray(list)) continue
+                for (const q of list) {
+                    const idMatch = q.href.match(/\/queues\/(?:[^/]+\/)?(\d+)/i)
+                    let freshCount = null
+                    if (idMatch && countById.has(idMatch[1])) {
+                        freshCount = countById.get(idMatch[1])
+                    } else if (countByName.has(q.name.trim().toLowerCase())) {
+                        freshCount = countByName.get(q.name.trim().toLowerCase())
+                    }
 
-                if (freshCount !== null && q.count !== freshCount) {
-                    q.count = freshCount
-                    anyUpdated = true
+                    if (freshCount !== null && q.count !== freshCount) {
+                        q.count = freshCount
+                        anyUpdated = true
+                    }
                 }
             }
 
@@ -682,10 +708,8 @@
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(queues))
             } catch (_) { }
 
-            // If any queue was missing live badges from DOM, trigger background API fetch
-            if (needsLiveCounts) {
-                fetchLiveQueueCounts(queues)
-            }
+            // Always fetch live counts from the API in background for resilience
+            fetchLiveQueueCounts(queues)
 
             return queues
         }
@@ -753,7 +777,7 @@
             '[data-testid="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-vc="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]'
         )
 
-        // 2. If nav exists, mount inside nav header
+        // 2. If nav exists with h1, mount inside nav header (Queue Page)
         if (nav) {
             const h1 = nav.querySelector('h1')
             if (h1) {
@@ -787,44 +811,60 @@
                     return true
                 }
             }
+        }
 
-            // nav exists without an h1 (e.g. ticket view under queues)
-            const headingOrTitle = nav.querySelector('h2, h3, [role="heading"], div[class*="_16jlkb7n"], [data-component-selector="breadcrumbs-wrapper"]')
-            const rowContainer = (headingOrTitle ? headingOrTitle.parentElement : null) || nav.querySelector('div[style*="display: flex"], div') || nav
-            if (rowContainer) {
-                let toolbarWrapper = null
-                for (const child of rowContainer.children) {
-                    if (child === headingOrTitle || child === bar) continue
-                    if (child.querySelector?.('button')) {
-                        toolbarWrapper = child
-                        break
-                    }
+        // 3. Sticky issue header (#jira-issue-header) on ticket views:
+        // Position the bar right ABOVE the ticket number and ticket name row,
+        // so the ticket name in header_proxy is not squeezed or pushed far right.
+        const stickyHeader = document.getElementById('jira-issue-header') ||
+            document.querySelector('[data-component-selector="breadcrumbs-wrapper"]')?.closest('#jira-issue-header, header, [role="banner"]')
+
+        if (stickyHeader) {
+            const breadcrumbs = stickyHeader.querySelector('[data-component-selector="breadcrumbs-wrapper"]') ||
+                document.querySelector('[data-component-selector="breadcrumbs-wrapper"]')
+
+            // The row that contains the breadcrumbs (ticket key) and proxy header (ticket name)
+            const titleAndKeyRow = breadcrumbs ? breadcrumbs.parentElement : (stickyHeader.querySelector('#gm-proxy-header')?.parentElement || stickyHeader.firstElementChild)
+
+            if (titleAndKeyRow && titleAndKeyRow !== bar) {
+                const parentContainer = titleAndKeyRow.parentElement || stickyHeader
+                parentContainer.style.display = 'flex'
+                parentContainer.style.flexDirection = 'column'
+                stickyHeader.style.display = 'flex'
+                stickyHeader.style.flexDirection = 'column'
+
+                if (bar.nextElementSibling !== titleAndKeyRow || bar.parentElement !== parentContainer) {
+                    titleAndKeyRow.insertAdjacentElement('beforebegin', bar)
                 }
-                if (toolbarWrapper) {
-                    if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
-                        rowContainer.insertBefore(bar, toolbarWrapper)
-                    }
-                } else {
-                    if (bar.parentElement !== rowContainer) {
-                        rowContainer.appendChild(bar)
-                    }
+                return true
+            } else {
+                stickyHeader.style.display = 'flex'
+                stickyHeader.style.flexDirection = 'column'
+                if (stickyHeader.firstElementChild !== bar) {
+                    stickyHeader.insertBefore(bar, stickyHeader.firstElementChild)
                 }
                 return true
             }
         }
 
-        // 3. Fallback: Sticky issue header (#jira-issue-header)
-        const issueHeader = document.querySelector('#jira-issue-header [data-component-selector="breadcrumbs-wrapper"]') ||
-            document.querySelector('#jira-issue-header')
-        if (issueHeader) {
-            const rowContainer = issueHeader.parentElement || issueHeader
-            if (bar.parentElement !== rowContainer) {
-                issueHeader.insertAdjacentElement('afterend', bar)
+        // 4. If breadcrumbs exist outside #jira-issue-header (e.g. non-standard issue view)
+        const breadcrumbs = document.querySelector('[data-component-selector="breadcrumbs-wrapper"]')
+        if (breadcrumbs) {
+            const titleAndKeyRow = breadcrumbs.parentElement
+            if (titleAndKeyRow && titleAndKeyRow !== bar) {
+                const parentContainer = titleAndKeyRow.parentElement
+                if (parentContainer) {
+                    parentContainer.style.display = 'flex'
+                    parentContainer.style.flexDirection = 'column'
+                    if (bar.nextElementSibling !== titleAndKeyRow || bar.parentElement !== parentContainer) {
+                        titleAndKeyRow.insertAdjacentElement('beforebegin', bar)
+                    }
+                    return true
+                }
             }
-            return true
         }
 
-        // 4. Final fallback to h1, but avoid mounting inside elements hidden by header proxy
+        // 5. Final fallback to h1, but avoid mounting inside elements hidden by header proxy
         const h1 = document.querySelector('h1:not([data-testid*="issue-field-summary"])') || document.querySelector('h1')
         if (!h1) return false
 
@@ -981,10 +1021,12 @@
         if (!rawQueues || rawQueues.length === 0) {
             if (cachedQueues.length > 0) {
                 rawQueues = cachedQueues
-                fetchLiveQueueCounts(rawQueues)
             }
         }
         if (!rawQueues || rawQueues.length === 0) return
+
+        // Always trigger API fetch for live counts in background (throttled to 5s)
+        fetchLiveQueueCounts(rawQueues)
 
         const queues = applyCustomOrder(rawQueues)
 
@@ -1267,6 +1309,9 @@
                 }
             })
         }
+        if (cachedQueues.length > 0) {
+            fetchLiveQueueCounts(cachedQueues)
+        }
         debouncedUpdate()
     }
 
@@ -1327,6 +1372,16 @@
     })
 
     observer.observe(document.body, { childList: true, subtree: true })
+
+    // Periodic background polling for live queue counts (every 30s)
+    setInterval(() => {
+        if (isTicketQueuesPage()) {
+            const queues = cachedQueues.length > 0 ? cachedQueues : getStarredQueuesFromDOM()
+            if (queues && queues.length > 0) {
+                fetchLiveQueueCounts(queues)
+            }
+        }
+    }, 30000)
 
     updateOrMountBar()
 })()
