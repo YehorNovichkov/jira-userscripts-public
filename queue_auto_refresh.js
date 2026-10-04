@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.0
+// @version     1.1.1
 // @author      oggmancuc
 // @description Automatically forces data refresh every minute on the "Waiting for Triage" queue. Compact icon button with an interactive dropdown for toggling, choosing Soft SPA or Hard Reload modes, and manual refresh.
 // ==/UserScript==
@@ -75,8 +75,11 @@
     function isIssueOrModalOpen() {
         if (window.location.search.includes('issueKey=')) return true
 
-        if (document.querySelector('[role="dialog"], .atlaskit-portal-container [role="dialog"], [data-testid*="modal"]')) {
-            return true
+        const modals = document.querySelectorAll('[role="dialog"], .atlaskit-portal-container [role="dialog"], [data-testid*="modal"]')
+        for (const m of modals) {
+            if (m.id !== POPOVER_ID && !m.closest(`#${WRAPPER_ID}, #gm-queue-alert-wrapper`)) {
+                return true
+            }
         }
 
         if (document.querySelector('[data-testid*="issue.views.issue-details"], [data-component-selector="jira-issue-view"], #jira-issue-header')) {
@@ -87,11 +90,13 @@
     }
 
     /**
-     * Checks if the user is currently editing text.
+     * Checks if the user is currently editing text in Jira inputs.
      */
     function isEditingText() {
         const active = document.activeElement
         if (!active) return false
+        // Exclude our own scripts' controls
+        if (active.closest && active.closest(`#${WRAPPER_ID}, #gm-queue-alert-wrapper`)) return false
         const tag = active.tagName.toLowerCase()
         if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
         if (active.isContentEditable || active.getAttribute('contenteditable') === 'true' || active.closest('[contenteditable="true"]')) return true
@@ -100,16 +105,24 @@
 
     /**
      * Checks if the user is actively interacting with the page.
+     * Note: In a background tab (document.hidden), user is NOT interacting on this tab,
+     * so auto-refresh will execute promptly.
      */
     function isUserInteracting() {
         if (document.hidden) return false
         if (Date.now() - lastActivityTime < IDLE_GRACE_PERIOD_MS) return true
         if (isEditingText()) return true
         if (isIssueOrModalOpen()) return true
-        if (document.querySelector('input[type="checkbox"]:checked')) return true
 
         const sel = window.getSelection()
-        if (sel && sel.toString().trim().length > 0) return true
+        if (sel && sel.toString().trim().length > 0) {
+            const anchor = sel.anchorNode
+            const el = anchor && (anchor.nodeType === Node.ELEMENT_NODE ? anchor : anchor.parentElement)
+            if (el && el.closest && el.closest(`#${WRAPPER_ID}, #gm-queue-alert-wrapper`)) {
+                return false
+            }
+            return true
+        }
 
         return false
     }
@@ -119,7 +132,6 @@
         if (document.hidden) return 'Background tab: active'
         if (isEditingText()) return 'Paused: typing / editing'
         if (isIssueOrModalOpen()) return 'Paused: viewing issue details'
-        if (document.querySelector('input[type="checkbox"]:checked')) return 'Paused: tickets selected'
         if (Date.now() - lastActivityTime < IDLE_GRACE_PERIOD_MS) {
             const idleSec = Math.ceil((IDLE_GRACE_PERIOD_MS - (Date.now() - lastActivityTime)) / 1000)
             return `Paused: user active (${idleSec}s grace)`
