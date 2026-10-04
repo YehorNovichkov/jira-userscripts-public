@@ -3,9 +3,9 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.0.0
+// @version     1.1.0
 // @author      oggmancuc
-// @description Automatically forces data refresh every minute on the "Waiting for Triage" queue. Pauses during user activity and supports soft SPA re-navigation or full page reload.
+// @description Automatically forces data refresh every minute on the "Waiting for Triage" queue. Compact icon button with an interactive dropdown for toggling, choosing Soft SPA or Hard Reload modes, and manual refresh.
 // ==/UserScript==
 
 ; (function () {
@@ -18,9 +18,9 @@
 
     const STORAGE_KEY = 'gm-queue-refresh-enabled'
     const MODE_STORAGE_KEY = 'gm-queue-refresh-mode' // 'soft' or 'reload'
+    const WRAPPER_ID = 'gm-queue-refresh-wrapper'
     const BUTTON_ID = 'gm-queue-refresh-toggle'
-    const MODE_BUTTON_ID = 'gm-queue-refresh-mode-toggle'
-    const NOW_BUTTON_ID = 'gm-queue-refresh-now'
+    const POPOVER_ID = 'gm-queue-refresh-popover'
     const STYLE_ID = 'gm-queue-refresh-style'
 
     let refreshEnabled = localStorage.getItem(STORAGE_KEY) !== 'false' // default ON
@@ -73,10 +73,8 @@
      * Checks if an issue detail / split view or modal is open.
      */
     function isIssueOrModalOpen() {
-        // Check URL for open issue in split view
         if (window.location.search.includes('issueKey=')) return true
 
-        // Check for modal dialogs, drawers, or issue details container
         if (document.querySelector('[role="dialog"], .atlaskit-portal-container [role="dialog"], [data-testid*="modal"]')) {
             return true
         }
@@ -89,41 +87,44 @@
     }
 
     /**
-     * Checks if the user is currently actively interacting with the page.
-     * Refresh will be paused if:
-     * 1. The tab is visible AND user interacted within the last IDLE_GRACE_PERIOD_MS (15s)
-     * 2. An input, textarea, or contenteditable editor is focused
-     * 3. An issue detail panel, split view, or modal dialog is open
-     * 4. Text is actively selected by the user
-     * 5. Any table row checkboxes are currently checked (bulk action in progress)
-     *
-     * Note: In a background/hidden tab, user is NOT interacting, so refresh proceeds promptly!
+     * Checks if the user is currently editing text.
+     */
+    function isEditingText() {
+        const active = document.activeElement
+        if (!active) return false
+        const tag = active.tagName.toLowerCase()
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
+        if (active.isContentEditable || active.getAttribute('contenteditable') === 'true' || active.closest('[contenteditable="true"]')) return true
+        return false
+    }
+
+    /**
+     * Checks if the user is actively interacting with the page.
      */
     function isUserInteracting() {
         if (document.hidden) return false
-
-        // Recent user input/mouse/scroll interaction
         if (Date.now() - lastActivityTime < IDLE_GRACE_PERIOD_MS) return true
-
-        // User actively focusing or typing in an input/textarea/editor
-        const active = document.activeElement
-        if (active) {
-            const tag = active.tagName.toLowerCase()
-            if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
-            if (active.isContentEditable || active.getAttribute('contenteditable') === 'true' || active.closest('[contenteditable="true"]')) return true
-        }
-
-        // Issue detail view or modal open
+        if (isEditingText()) return true
         if (isIssueOrModalOpen()) return true
-
-        // Checkboxes checked in ticket table
         if (document.querySelector('input[type="checkbox"]:checked')) return true
 
-        // Text actively selected
         const sel = window.getSelection()
         if (sel && sel.toString().trim().length > 0) return true
 
         return false
+    }
+
+    function getActivityStatusText() {
+        if (!refreshEnabled) return 'Auto refresh is disabled'
+        if (document.hidden) return 'Background tab: active'
+        if (isEditingText()) return 'Paused: typing / editing'
+        if (isIssueOrModalOpen()) return 'Paused: viewing issue details'
+        if (document.querySelector('input[type="checkbox"]:checked')) return 'Paused: tickets selected'
+        if (Date.now() - lastActivityTime < IDLE_GRACE_PERIOD_MS) {
+            const idleSec = Math.ceil((IDLE_GRACE_PERIOD_MS - (Date.now() - lastActivityTime)) / 1000)
+            return `Paused: user active (${idleSec}s grace)`
+        }
+        return 'Idle: refresh ready'
     }
 
     // ── Queue Navigation Helpers for Soft SPA Refresh ───────────────────
@@ -140,7 +141,7 @@
     function findOtherQueueLink() {
         const currentPath = getNormalizedPath(window.location.href)
 
-        // 1. Check Starred Queues Bar chips (if starred_queues_bar.js is installed)
+        // 1. Check Starred Queues Bar chips
         const chips = Array.from(document.querySelectorAll('#gm-starred-queues-bar a.gm-queue-chip'))
         for (const chip of chips) {
             const p = getNormalizedPath(chip.getAttribute('href') || chip.dataset.href)
@@ -185,16 +186,6 @@
         return null
     }
 
-    /**
-     * Soft SPA Re-Navigation:
-     * Switches briefly to an adjacent queue and immediately back.
-     * Benefits:
-     * - Forces Jira's React queue component to remount and fetch fresh data
-     * - Keeps AudioContext active (unbroken user-gesture permission for queue_alert.js)
-     * - Avoids page reload flicker and retains fast PWA response
-     *
-     * Falls back to false if no alternate queue link is found.
-     */
     function performSoftRefresh() {
         return new Promise((resolve) => {
             const otherLink = findOtherQueueLink()
@@ -212,7 +203,6 @@
 
             // Step 2: Navigate back to Waiting for Triage after route transition begins
             setTimeout(() => {
-                // If history moved forward to the other queue, history.back() restores state cleanly
                 if (window.location.href !== originalUrl) {
                     window.history.back()
                     resolve(true)
@@ -241,7 +231,6 @@
             if (activeMode === 'soft') {
                 const success = await performSoftRefresh()
                 if (!success) {
-                    // If soft re-navigation couldn't find an alternate queue, fallback to full reload
                     window.location.reload()
                     return
                 }
@@ -282,7 +271,6 @@
         if (isRefreshing) return
 
         if (isUserInteracting()) {
-            // Postpone refresh while user is interacting
             nextRefreshTime = Math.max(nextRefreshTime, Date.now() + IDLE_GRACE_PERIOD_MS)
             updateButtonState()
             return
@@ -309,29 +297,34 @@
         }
     }
 
-    // ── UI Injection & Styling ──────────────────────────────────────────
+    // ── UI Injection & Dropdown Popover ──────────────────────────────────
     function injectStyles() {
         if (document.getElementById(STYLE_ID)) return
 
         const style = document.createElement('style')
         style.id = STYLE_ID
         style.innerHTML = `
-            #${BUTTON_ID},
-            #${MODE_BUTTON_ID},
-            #${NOW_BUTTON_ID} {
+            #${WRAPPER_ID} {
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+                vertical-align: middle;
+            }
+            #${BUTTON_ID} {
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                gap: 4px;
+                width: 28px;
+                height: 28px;
                 border: none;
-                border-radius: 3px;
-                padding: 4px 8px;
+                border-radius: 4px;
+                padding: 0;
                 cursor: pointer;
-                font: var(--ds-font-body-UNSAFE_small, normal 400 12px/16px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, system-ui, sans-serif);
+                font-size: 14px;
+                line-height: 1;
                 transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.1s;
-                vertical-align: middle;
-                white-space: nowrap;
                 user-select: none;
+                box-sizing: border-box;
             }
             #${BUTTON_ID}.gm-refresh-active {
                 background: var(--ds-background-information, #E9F2FF);
@@ -345,18 +338,10 @@
                 background: var(--ds-background-neutral, #091E420F);
                 color: var(--ds-text-subtlest, #6B6E76);
             }
-            #${MODE_BUTTON_ID},
-            #${NOW_BUTTON_ID} {
-                background: var(--ds-background-neutral, #091E420F);
-                color: var(--ds-text-subtle, #44546F);
-            }
-            #${BUTTON_ID}:hover,
-            #${MODE_BUTTON_ID}:hover,
-            #${NOW_BUTTON_ID}:hover {
+            #${BUTTON_ID}:hover {
                 box-shadow: 0 0 0 2px var(--ds-border-focused, #388BFF);
-                background: var(--ds-background-neutral-hovered, #091E4224);
             }
-            #${NOW_BUTTON_ID}:active {
+            #${BUTTON_ID}:active {
                 transform: scale(0.95);
             }
             .gm-refresh-spin {
@@ -367,29 +352,248 @@
                 from { transform: rotate(0deg); }
                 to { transform: rotate(360deg); }
             }
+
+            /* Dropdown Popover */
+            #${POPOVER_ID} {
+                position: absolute;
+                top: calc(100% + 6px);
+                right: 0;
+                z-index: 10000;
+                width: 260px;
+                background: var(--ds-surface-overlay, #FFFFFF);
+                border: 1px solid var(--ds-border, rgba(9, 30, 66, 0.14));
+                border-radius: 8px;
+                box-shadow: 0 8px 24px -4px rgba(9, 30, 66, 0.2), 0 0 1px rgba(9, 30, 66, 0.3);
+                padding: 12px;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                font: var(--ds-font-body-UNSAFE_small, normal 400 12px/16px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, system-ui, sans-serif);
+                color: var(--ds-text, #172B4D);
+                animation: gm-refresh-fade-in 0.15s cubic-bezier(0.2, 0, 0, 1);
+            }
+            @keyframes gm-refresh-fade-in {
+                from { opacity: 0; transform: translateY(-4px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+
+            /* Popover Header */
+            .gm-pop-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--ds-border, rgba(9, 30, 66, 0.1));
+            }
+            .gm-pop-title {
+                font-weight: 700;
+                font-size: 13px;
+                color: var(--ds-text, #172B4D);
+            }
+            .gm-pop-badge {
+                padding: 2px 6px;
+                border-radius: 10px;
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .gm-badge-info {
+                background: var(--ds-background-information, #E9F2FF);
+                color: var(--ds-text-information, #0C66E4);
+            }
+            .gm-badge-warning {
+                background: var(--ds-background-warning, #FFF3CD);
+                color: var(--ds-text-warning, #A54800);
+            }
+            .gm-badge-neutral {
+                background: var(--ds-background-neutral, #091E420F);
+                color: var(--ds-text-subtlest, #6B6E76);
+            }
+
+            /* Switch Toggle Row */
+            .gm-switch-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                cursor: pointer;
+                user-select: none;
+            }
+            .gm-switch-text {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .gm-switch-title {
+                font-weight: 600;
+                font-size: 12px;
+                color: var(--ds-text, #172B4D);
+            }
+            .gm-switch-sub {
+                font-size: 11px;
+                color: var(--ds-text-subtle, #626F86);
+            }
+
+            /* Toggle Switch */
+            .gm-toggle-switch {
+                position: relative;
+                width: 34px;
+                height: 18px;
+                flex-shrink: 0;
+            }
+            .gm-toggle-switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            .gm-toggle-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background-color: var(--ds-background-neutral, rgba(9, 30, 66, 0.14));
+                transition: 0.2s;
+                border-radius: 18px;
+            }
+            .gm-toggle-slider:before {
+                position: absolute;
+                content: "";
+                height: 14px;
+                width: 14px;
+                left: 2px;
+                bottom: 2px;
+                background-color: white;
+                transition: 0.2s;
+                border-radius: 50%;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            }
+            .gm-toggle-switch input:checked + .gm-toggle-slider {
+                background-color: var(--ds-background-selected-bold, #0C66E4);
+            }
+            .gm-toggle-switch input:checked + .gm-toggle-slider:before {
+                transform: translateX(16px);
+            }
+
+            /* Refresh Mode Cards */
+            .gm-mode-group {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .gm-mode-group-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--ds-text-subtle, #626F86);
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .gm-mode-card {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 10px;
+                border-radius: 6px;
+                border: 1px solid var(--ds-border, rgba(9, 30, 66, 0.12));
+                background: var(--ds-surface, #FFFFFF);
+                cursor: pointer;
+                transition: background 0.15s, border-color 0.15s;
+                user-select: none;
+            }
+            .gm-mode-card:hover {
+                background: var(--ds-background-neutral-subtle, rgba(9, 30, 66, 0.04));
+                border-color: var(--ds-border-focused, #388BFF);
+            }
+            .gm-mode-card.gm-selected {
+                background: var(--ds-background-selected, #E9F2FF);
+                border-color: var(--ds-border-focused, #388BFF);
+            }
+            .gm-card-icon {
+                font-size: 15px;
+            }
+            .gm-card-label {
+                font-weight: 600;
+                font-size: 12px;
+                color: var(--ds-text, #172B4D);
+            }
+            .gm-card-timing {
+                font-size: 11px;
+                color: var(--ds-text-subtle, #626F86);
+            }
+
+            /* Footer & Action Button */
+            .gm-pop-footer {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding-top: 8px;
+                border-top: 1px solid var(--ds-border, rgba(9, 30, 66, 0.08));
+            }
+            .gm-guard-status {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 11px;
+                color: var(--ds-text-subtle, #626F86);
+            }
+            .gm-guard-dot {
+                width: 7px;
+                height: 7px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }
+            .gm-dot-green {
+                background-color: #22A06B;
+            }
+            .gm-dot-amber {
+                background-color: #E2B203;
+            }
+            .gm-dot-gray {
+                background-color: #8993A4;
+            }
+            .gm-now-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                width: 100%;
+                padding: 6px 12px;
+                border: none;
+                border-radius: 4px;
+                background: var(--ds-background-neutral, rgba(9, 30, 66, 0.08));
+                color: var(--ds-text, #172B4D);
+                font-weight: 600;
+                font-size: 12px;
+                cursor: pointer;
+                transition: background 0.15s, transform 0.1s;
+                user-select: none;
+            }
+            .gm-now-btn:hover {
+                background: var(--ds-background-neutral-hovered, rgba(9, 30, 66, 0.16));
+            }
+            .gm-now-btn:active {
+                transform: scale(0.97);
+            }
         `
         document.head.appendChild(style)
     }
 
     function updateButtonState(forceRefreshing = false) {
         const btn = document.getElementById(BUTTON_ID)
-        const modeBtn = document.getElementById(MODE_BUTTON_ID)
-        const nowBtn = document.getElementById(NOW_BUTTON_ID)
-
         if (!btn) return
 
         if (forceRefreshing || isRefreshing) {
             btn.className = 'gm-refresh-active'
-            btn.innerHTML = '<span class="gm-refresh-spin">🔄</span><span>Refreshing...</span>'
-            btn.title = 'Forcing data refresh...'
+            btn.innerHTML = '<span class="gm-refresh-spin">🔄</span>'
+            btn.title = 'Queue Auto Refresh: Refreshing now...'
+            updatePopoverContent()
             return
         }
 
         if (!refreshEnabled) {
             btn.className = 'gm-refresh-off'
             btn.setAttribute('aria-pressed', 'false')
-            btn.title = 'Queue auto-refresh is OFF — click to enable (every 60s)'
-            btn.innerHTML = '<span>⚪</span><span>Refresh OFF</span>'
+            btn.title = 'Queue Auto Refresh: OFF • Click to open settings'
+            btn.innerHTML = '<span>⚪</span>'
         } else {
             const interacting = isUserInteracting()
             const remainingMs = Math.max(0, nextRefreshTime - Date.now())
@@ -398,31 +602,124 @@
             if (interacting) {
                 btn.className = 'gm-refresh-paused'
                 btn.setAttribute('aria-pressed', 'true')
-                btn.title = `Auto-refresh paused (user active / modal open) • Will resume when idle for ${IDLE_GRACE_PERIOD_SECONDS}s or in background tab\nClick to turn OFF`
-                btn.innerHTML = `<span>⏸️</span><span>Paused (${remainingSec}s)</span>`
+                btn.title = `Queue Auto Refresh: Paused (user active) • Next in ${remainingSec}s\nClick to open settings`
+                btn.innerHTML = '<span>⏸️</span>'
             } else {
                 btn.className = 'gm-refresh-active'
                 btn.setAttribute('aria-pressed', 'true')
-                btn.title = `Auto-refresh is ON (every ${REFRESH_INTERVAL_SECONDS}s) • Mode: ${refreshMode.toUpperCase()}\nNext refresh in ${remainingSec}s\nClick to pause/turn OFF`
-                btn.innerHTML = `<span>🔄</span><span>${remainingSec}s</span>`
+                btn.title = `Queue Auto Refresh: Next in ${remainingSec}s (${refreshMode.toUpperCase()})\nClick to open settings`
+                btn.innerHTML = '<span>🔄</span>'
             }
         }
 
-        if (modeBtn) {
-            if (refreshMode === 'soft') {
-                modeBtn.className = 'gm-mode-soft'
-                modeBtn.title = 'Mode: Soft SPA Re-Navigation (switches away & back instantly without page reload)\nKeeps sound alert active • Click to switch to Hard Reload'
-                modeBtn.innerHTML = '<span>⚡ Soft</span>'
+        updatePopoverContent()
+    }
+
+    function updatePopoverContent() {
+        const popover = document.getElementById(POPOVER_ID)
+        if (!popover) return
+
+        let badgeClass = 'gm-badge-neutral'
+        let badgeText = 'OFF'
+        let dotClass = 'gm-dot-gray'
+
+        if (isRefreshing) {
+            badgeClass = 'gm-badge-info'
+            badgeText = 'REFRESHING'
+            dotClass = 'gm-dot-green'
+        } else if (refreshEnabled) {
+            const remainingMs = Math.max(0, nextRefreshTime - Date.now())
+            const remainingSec = Math.ceil(remainingMs / 1000)
+
+            if (isUserInteracting()) {
+                badgeClass = 'gm-badge-warning'
+                badgeText = `PAUSED (${remainingSec}s)`
+                dotClass = 'gm-dot-amber'
             } else {
-                modeBtn.className = 'gm-mode-reload'
-                modeBtn.title = 'Mode: Hard Page Reload (full location.reload())\nClick to switch to Soft SPA'
-                modeBtn.innerHTML = '<span>🔁 Reload</span>'
+                badgeClass = 'gm-badge-info'
+                badgeText = `${remainingSec}s REMAINING`
+                dotClass = 'gm-dot-green'
             }
         }
 
+        const statusText = getActivityStatusText()
+
+        popover.innerHTML = `
+            <div class="gm-pop-header">
+                <span class="gm-pop-title">Auto Refresh</span>
+                <span class="gm-pop-badge ${badgeClass}">${badgeText}</span>
+            </div>
+
+            <label class="gm-switch-row" id="gm-refresh-switch-row">
+                <div class="gm-switch-text">
+                    <span class="gm-switch-title">Auto Refresh</span>
+                    <span class="gm-switch-sub">Forces queue data retrieval every 60s</span>
+                </div>
+                <div class="gm-toggle-switch">
+                    <input type="checkbox" id="gm-refresh-checkbox" ${refreshEnabled ? 'checked' : ''}>
+                    <span class="gm-toggle-slider"></span>
+                </div>
+            </label>
+
+            <div class="gm-mode-group">
+                <div class="gm-mode-group-title">Refresh Method</div>
+
+                <div class="gm-mode-card ${refreshMode === 'soft' ? 'gm-selected' : ''}" data-mode="soft">
+                    <span class="gm-card-icon">⚡</span>
+                    <div>
+                        <div class="gm-card-label">Soft SPA (Recommended)</div>
+                        <div class="gm-card-timing">Fast, no reload, keeps sound alerts alive</div>
+                    </div>
+                </div>
+
+                <div class="gm-mode-card ${refreshMode === 'reload' ? 'gm-selected' : ''}" data-mode="reload">
+                    <span class="gm-card-icon">🔁</span>
+                    <div>
+                        <div class="gm-card-label">Hard Page Reload</div>
+                        <div class="gm-card-timing">Full browser reload, clears memory</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="gm-pop-footer">
+                <div class="gm-guard-status">
+                    <span class="gm-guard-dot ${dotClass}"></span>
+                    <span>${statusText}</span>
+                </div>
+                <button type="button" class="gm-now-btn" id="gm-pop-refresh-now" title="Force refresh right now (Shift-click to alternate mode)">
+                    <span>↻</span>
+                    <span>Refresh Now</span>
+                </button>
+            </div>
+        `
+
+        // Attach event listeners
+        const checkbox = popover.querySelector('#gm-refresh-checkbox')
+        if (checkbox) {
+            checkbox.addEventListener('change', () => {
+                handleToggle()
+            })
+        }
+
+        const modeCards = popover.querySelectorAll('.gm-mode-card')
+        modeCards.forEach(card => {
+            card.addEventListener('click', () => {
+                const mode = card.dataset.mode
+                if (mode && mode !== refreshMode) {
+                    handleModeToggle(mode)
+                }
+            })
+        })
+
+        const nowBtn = popover.querySelector('#gm-pop-refresh-now')
         if (nowBtn) {
-            nowBtn.title = `Force refresh right now (${refreshMode === 'soft' ? 'Soft SPA' : 'Full Reload'})\nShift-click to alternate mode`
-            nowBtn.innerHTML = '<span>↻ Refresh</span>'
+            nowBtn.addEventListener('click', (e) => {
+                if (e.shiftKey) {
+                    executeRefresh(refreshMode === 'soft' ? 'reload' : 'soft')
+                } else {
+                    executeRefresh()
+                }
+            })
         }
     }
 
@@ -437,16 +734,54 @@
         }
     }
 
-    function handleModeToggle() {
-        refreshMode = refreshMode === 'soft' ? 'reload' : 'soft'
+    function handleModeToggle(newMode) {
+        refreshMode = newMode
         localStorage.setItem(MODE_STORAGE_KEY, refreshMode)
         updateButtonState()
     }
 
+    function togglePopover() {
+        const popover = document.getElementById(POPOVER_ID)
+        const btn = document.getElementById(BUTTON_ID)
+        if (!popover) return
+
+        const isOpen = popover.style.display !== 'none'
+        if (isOpen) {
+            popover.style.display = 'none'
+            btn?.setAttribute('aria-expanded', 'false')
+        } else {
+            // Close other popovers (e.g. alert script)
+            document.getElementById('gm-queue-alert-popover')?.style.setProperty('display', 'none')
+            document.getElementById('gm-queue-alert-toggle')?.setAttribute('aria-expanded', 'false')
+
+            updatePopoverContent()
+            popover.style.display = 'flex'
+            btn?.setAttribute('aria-expanded', 'true')
+        }
+    }
+
+    function closePopover() {
+        const popover = document.getElementById(POPOVER_ID)
+        if (popover && popover.style.display !== 'none') {
+            popover.style.display = 'none'
+            document.getElementById(BUTTON_ID)?.setAttribute('aria-expanded', 'false')
+        }
+    }
+
+    // Close on click outside or Escape key
+    document.addEventListener('click', (e) => {
+        const wrapper = document.getElementById(WRAPPER_ID)
+        if (wrapper && !wrapper.contains(e.target)) {
+            closePopover()
+        }
+    })
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closePopover()
+    })
+
     function removeButtons() {
-        document.getElementById(BUTTON_ID)?.remove()
-        document.getElementById(MODE_BUTTON_ID)?.remove()
-        document.getElementById(NOW_BUTTON_ID)?.remove()
+        document.getElementById(WRAPPER_ID)?.remove()
     }
 
     function injectButtons() {
@@ -455,7 +790,7 @@
             return
         }
 
-        if (document.getElementById(BUTTON_ID) && document.getElementById(MODE_BUTTON_ID) && document.getElementById(NOW_BUTTON_ID)) {
+        if (document.getElementById(WRAPPER_ID)) {
             updateButtonState()
             return
         }
@@ -472,7 +807,7 @@
         let toolbar = null
         for (const child of rowContainer.children) {
             if (child === h1Wrapper) continue
-            if (child.querySelector('[data-testid*="favorite-button"], [aria-label="Star"], #gm-queue-alert-toggle')) {
+            if (child.querySelector('[data-testid*="favorite-button"], [aria-label="Star"], #gm-queue-alert-toggle, #gm-queue-alert-wrapper')) {
                 toolbar = child
                 break
             }
@@ -484,45 +819,33 @@
 
         if (!toolbar) return
 
-        const flexRow = toolbar.querySelector('[data-testid*="favorite-button"], [aria-label="Star"], #gm-queue-alert-toggle')
+        const flexRow = toolbar.querySelector('[data-testid*="favorite-button"], [aria-label="Star"], #gm-queue-alert-toggle, #gm-queue-alert-wrapper')
             ?.closest('div[class]')?.parentElement || toolbar
 
-        // 1. Countdown & Toggle button
-        if (!document.getElementById(BUTTON_ID)) {
-            const btn = document.createElement('button')
-            btn.id = BUTTON_ID
-            btn.type = 'button'
-            btn.setAttribute('aria-label', 'Toggle queue auto-refresh')
-            btn.addEventListener('click', handleToggle)
-            flexRow.appendChild(btn)
-        }
+        // Create container wrapper
+        const wrapper = document.createElement('div')
+        wrapper.id = WRAPPER_ID
 
-        // 2. Mode button (Soft vs Reload)
-        if (!document.getElementById(MODE_BUTTON_ID)) {
-            const modeBtn = document.createElement('button')
-            modeBtn.id = MODE_BUTTON_ID
-            modeBtn.type = 'button'
-            modeBtn.setAttribute('aria-label', 'Toggle refresh mode (Soft SPA vs Hard Reload)')
-            modeBtn.addEventListener('click', handleModeToggle)
-            flexRow.appendChild(modeBtn)
-        }
+        // Icon Trigger button
+        const btn = document.createElement('button')
+        btn.id = BUTTON_ID
+        btn.type = 'button'
+        btn.setAttribute('aria-haspopup', 'true')
+        btn.setAttribute('aria-expanded', 'false')
+        btn.setAttribute('aria-label', 'Queue auto-refresh settings')
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            togglePopover()
+        })
+        wrapper.appendChild(btn)
 
-        // 3. Manual "Refresh Now" button
-        if (!document.getElementById(NOW_BUTTON_ID)) {
-            const nowBtn = document.createElement('button')
-            nowBtn.id = NOW_BUTTON_ID
-            nowBtn.type = 'button'
-            nowBtn.setAttribute('aria-label', 'Force refresh queue now')
-            nowBtn.addEventListener('click', (e) => {
-                if (e.shiftKey) {
-                    executeRefresh(refreshMode === 'soft' ? 'reload' : 'soft')
-                } else {
-                    executeRefresh()
-                }
-            })
-            flexRow.appendChild(nowBtn)
-        }
+        // Dropdown Popover
+        const popover = document.createElement('div')
+        popover.id = POPOVER_ID
+        popover.style.display = 'none'
+        wrapper.appendChild(popover)
 
+        flexRow.appendChild(wrapper)
         updateButtonState()
     }
 
