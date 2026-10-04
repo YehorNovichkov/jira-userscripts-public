@@ -46,6 +46,7 @@
     <br>
     <img src="assets/screenshots/alert.png" alt="Queue Alert Preview">
   </details>
+* **`queue_auto_refresh.js`**: Automatically forces data refresh every minute on the "Waiting for Triage" queue. Pauses during user activity and supports soft SPA re-navigation or full page reload.
 * **`recovery_signal.js`** (deprecated): Adds a pulsing green indicator if the 'recovered' label is present on the issue.
 * **`signature.js`**: Adds a button to insert a standard signature in the Jira comment editor.
 * **`starred_queues_bar.js`**: Duplicates starred queues into a neat, responsive horizontal bar in the queue header for fast one-click switching. Features drag-to-reorder, local queue renaming, and single-row collapse with an expand toggle.
