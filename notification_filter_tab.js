@@ -3,12 +3,12 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.0.0
+// @version     1.1.0
 // @author      oggmancuc
 // @description Hides notifications from your own actions and Automation for Jira, placing them in a dedicated 'Self & Automation' tab.
 // ==/UserScript==
 
-;(function () {
+; (function () {
     'use strict'
 
     // =========================================================================
