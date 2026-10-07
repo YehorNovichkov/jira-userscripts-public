@@ -29,16 +29,11 @@
         showBadge: true,
 
         // Highlight badge when there are unread filtered notifications
-        highlightUnread: true,
-
-        // Show a notice in native tabs when all notifications were filtered out
-        showAllFilteredNotice: true
+        highlightUnread: true
     }
 
     const STYLE_ID = 'gm-notification-filter-style'
     const TAB_ID = 'gm-jira-filter-tab'
-    const NOTICE_ID = 'gm-jira-all-filtered-notice'
-    const EMPTY_STATE_ID = 'gm-jira-filter-empty-state'
 
     // 'native' = viewing Direct or Watching (custom tab inactive, filtered items hidden)
     // 'filtered' = viewing custom tab (normal items hidden, filtered items visible)
@@ -131,58 +126,6 @@
             }
             .gm-filtered-tab-active [role="tablist"] [role="tab"]:not(#${TAB_ID})::after {
                 display: none !important;
-            }
-
-            /* Empty state notices */
-            .gm-jira-notice-container {
-                display: flex !important;
-                flex-direction: column !important;
-                align-items: center !important;
-                justify-content: center !important;
-                padding: 32px 16px !important;
-                text-align: center !important;
-                color: var(--ds-text-subtle, #626F86) !important;
-                animation: gmFadeIn 0.2s ease-in-out !important;
-            }
-
-            .gm-jira-notice-icon {
-                margin-bottom: 12px !important;
-                color: var(--ds-icon-subtle, #626F86) !important;
-            }
-
-            .gm-jira-notice-title {
-                font-size: 14px !important;
-                font-weight: 600 !important;
-                margin-bottom: 4px !important;
-                color: var(--ds-text, #172B4D) !important;
-            }
-
-            .gm-jira-notice-desc {
-                font-size: 12px !important;
-                line-height: 16px !important;
-                max-width: 280px !important;
-                margin-bottom: 14px !important;
-            }
-
-            .gm-jira-notice-btn {
-                background-color: var(--ds-background-neutral, rgba(9, 30, 66, 0.08)) !important;
-                color: var(--ds-text, #172B4D) !important;
-                border: none !important;
-                border-radius: 4px !important;
-                padding: 6px 12px !important;
-                font-size: 12px !important;
-                font-weight: 500 !important;
-                cursor: pointer !important;
-                transition: background-color 0.15s ease !important;
-            }
-
-            .gm-jira-notice-btn:hover {
-                background-color: var(--ds-background-neutral-hovered, rgba(9, 30, 66, 0.14)) !important;
-            }
-
-            @keyframes gmFadeIn {
-                from { opacity: 0; transform: translateY(4px); }
-                to { opacity: 1; transform: translateY(0); }
             }
         `
         document.head.appendChild(style)
@@ -412,9 +355,11 @@
 
             if (row) {
                 row.classList.toggle('gm-notification-hidden', shouldHide)
-                if (!shouldHide) visibleCount++
             }
         })
+
+        // Clean up any previously injected notice elements if present
+        drawer.querySelectorAll('.gm-jira-notice-container, #gm-jira-all-filtered-notice, #gm-jira-filter-empty-state').forEach(el => el.remove())
 
         // Update custom tab badge
         if (customTab && CONFIG.showBadge) {
@@ -433,9 +378,6 @@
 
         // Update time-group section headings (e.g. "Today", "Yesterday")
         updateDateHeadings(drawer)
-
-        // Handle empty states
-        updateEmptyStates(drawer, totalFiltered, visibleCount)
     }
 
     function updateDateHeadings(drawer) {
@@ -453,70 +395,6 @@
             const hasVisible = Array.from(articles).some(art => !art.classList.contains('gm-notification-hidden'))
             dateSection.classList.toggle('gm-notification-hidden', !hasVisible)
         })
-    }
-
-    function updateEmptyStates(drawer, totalFiltered, visibleCount) {
-        // 1. Notice when on native tab and all items were filtered out
-        let noticeEl = drawer.querySelector(`#${NOTICE_ID}`)
-        if (activeTabMode === 'native' && CONFIG.showAllFilteredNotice && visibleCount === 0 && totalFiltered > 0) {
-            if (!noticeEl) {
-                const targetContainer = drawer.querySelector('[role="tabpanel"]') || drawer
-                noticeEl = document.createElement('div')
-                noticeEl.id = NOTICE_ID
-                noticeEl.className = 'gm-jira-notice-container'
-                noticeEl.innerHTML = `
-                    <div class="gm-jira-notice-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                        </svg>
-                    </div>
-                    <div class="gm-jira-notice-title">All notifications here were filtered</div>
-                    <div class="gm-jira-notice-desc">
-                        ${totalFiltered} notification${totalFiltered > 1 ? 's' : ''} from ${CONFIG.filterActors.join(' & ')} moved to the separate tab.
-                    </div>
-                    <button type="button" class="gm-jira-notice-btn">View in ${CONFIG.tabTitle} (${totalFiltered})</button>
-                `
-                noticeEl.querySelector('button').addEventListener('click', () => {
-                    switchTabMode('filtered')
-                })
-                targetContainer.appendChild(noticeEl)
-            } else {
-                noticeEl.style.display = 'flex'
-                const btn = noticeEl.querySelector('button')
-                if (btn) btn.textContent = `View in ${CONFIG.tabTitle} (${totalFiltered})`
-            }
-        } else if (noticeEl) {
-            noticeEl.style.display = 'none'
-        }
-
-        // 2. Empty state when on custom tab and no filtered notifications exist
-        let emptyStateEl = drawer.querySelector(`#${EMPTY_STATE_ID}`)
-        if (activeTabMode === 'filtered' && totalFiltered === 0) {
-            if (!emptyStateEl) {
-                const targetContainer = drawer.querySelector('[role="tabpanel"]') || drawer
-                emptyStateEl = document.createElement('div')
-                emptyStateEl.id = EMPTY_STATE_ID
-                emptyStateEl.className = 'gm-jira-notice-container'
-                emptyStateEl.innerHTML = `
-                    <div class="gm-jira-notice-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-                        </svg>
-                    </div>
-                    <div class="gm-jira-notice-title">No filtered notifications</div>
-                    <div class="gm-jira-notice-desc">
-                        Notifications from ${CONFIG.filterActors.join(' and ')} will appear here.
-                    </div>
-                `
-                targetContainer.appendChild(emptyStateEl)
-            } else {
-                emptyStateEl.style.display = 'flex'
-            }
-        } else if (emptyStateEl) {
-            emptyStateEl.style.display = 'none'
-        }
     }
 
     // =========================================================================
