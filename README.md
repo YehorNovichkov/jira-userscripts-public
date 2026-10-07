@@ -34,6 +34,7 @@
     <br>
     <img src="assets/screenshots/heatmap.png" alt="Heatmap Update Time Preview">
   </details>
+* **`notification_filter_tab.js`**: Hides notifications from your own actions and Automation for Jira from Direct/Watching lists and routes them into a dedicated 'Self & Automation' tab.
 * **`order_number_extractor.js`**: Extracts 10xx/30xx orders from the issue description and lists them for quick copying.
   <details>
     <summary>Preview</summary>
