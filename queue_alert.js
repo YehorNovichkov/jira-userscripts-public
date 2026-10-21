@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.0
+// @version     1.1.1
 // @author      oggmancuc
 // @description Plays an alert sound when tickets appear in the "Waiting for Triage" queue. Compact icon button with an interactive settings dropdown to configure chime/alarm modes and preview sounds.
 // ==/UserScript==
@@ -20,6 +20,7 @@
     const BUTTON_ID = 'gm-queue-alert-toggle' // Kept for compatibility with other scripts
     const POPOVER_ID = 'gm-queue-alert-popover'
     const STYLE_ID = 'gm-queue-alert-style'
+    const GROUP_ID = 'gm-queue-controls' // Shared with queue_auto_refresh.js
 
     let alertEnabled = localStorage.getItem(STORAGE_KEY) !== 'false' // default ON
     let aggressiveMode = localStorage.getItem(MODE_STORAGE_KEY) === 'aggressive' // default normal
@@ -208,11 +209,17 @@
         const style = document.createElement('style')
         style.id = STYLE_ID
         style.innerHTML = `
+            #${GROUP_ID} {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
             #${WRAPPER_ID} {
                 position: relative;
                 display: inline-flex;
                 align-items: center;
                 vertical-align: middle;
+                order: 1;
             }
             #${BUTTON_ID} {
                 display: inline-flex;
@@ -637,27 +644,25 @@
     })
 
     /**
-     * Injects the compact icon button and its dropdown popover into the toolbar.
+     * Returns the controls group shared with the auto-refresh script, creating it in the toolbar if needed.
      */
-    function injectButton() {
-        if (document.getElementById(WRAPPER_ID)) {
-            updateButtonState()
-            return
-        }
+    function getControlsGroup() {
+        const existing = document.getElementById(GROUP_ID)
+        if (existing) return existing
 
         const heading = getQueueHeading()
-        if (!heading) return
+        if (!heading) return null
 
         const h1Wrapper = heading.parentElement
-        if (!h1Wrapper) return
+        if (!h1Wrapper) return null
 
         const rowContainer = h1Wrapper.parentElement
-        if (!rowContainer) return
+        if (!rowContainer) return null
 
         let toolbar = null
         for (const child of rowContainer.children) {
             if (child === h1Wrapper) continue
-            if (child.querySelector('[data-testid*="favorite-button"], [aria-label="Star"], #gm-queue-refresh-toggle')) {
+            if (child.querySelector('[data-testid*="favorite-button"], [aria-label="Star"]')) {
                 toolbar = child
                 break
             }
@@ -667,10 +672,34 @@
             toolbar = h1Wrapper.nextElementSibling
         }
 
-        if (!toolbar) return
+        if (!toolbar) return null
 
-        const flexRow = toolbar.querySelector('[data-testid*="favorite-button"], [aria-label="Star"], #gm-queue-refresh-toggle')
+        const flexRow = toolbar.querySelector('[data-testid*="favorite-button"], [aria-label="Star"]')
             ?.closest('div[class]')?.parentElement || toolbar
+
+        const group = document.createElement('div')
+        group.id = GROUP_ID
+        flexRow.appendChild(group)
+        return group
+    }
+
+    function removeButton() {
+        const group = document.getElementById(GROUP_ID)
+        document.getElementById(WRAPPER_ID)?.remove()
+        if (group && !group.children.length) group.remove()
+    }
+
+    /**
+     * Injects the compact icon button and its dropdown popover into the toolbar.
+     */
+    function injectButton() {
+        if (document.getElementById(WRAPPER_ID)) {
+            updateButtonState()
+            return
+        }
+
+        const group = getControlsGroup()
+        if (!group) return
 
         // Create container wrapper
         const wrapper = document.createElement('div')
@@ -695,7 +724,7 @@
         popover.style.display = 'none'
         wrapper.appendChild(popover)
 
-        flexRow.appendChild(wrapper)
+        group.appendChild(wrapper)
         updateButtonState()
     }
 
@@ -729,7 +758,7 @@
 
             if (!isOnTargetQueue() && intervalId !== null) {
                 stopInterval()
-                document.getElementById(WRAPPER_ID)?.remove()
+                removeButton()
             }
         }, 500)
     })
