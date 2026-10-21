@@ -3,9 +3,9 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.7.0
+// @version     1.8.0
 // @author      oggmancuc
-// @description Hides main header with a toggle button to reveal it for editing, and hides clutter panels (Similar requests, Alert link).
+// @description Hides main header with a toggle button to reveal it for editing, and hides clutter panels (Similar requests, Alert link, Agents) and the Agents button.
 // ==/UserScript==
 
 ;(function () {
@@ -28,7 +28,13 @@
         body.gm-hide-header [data-testid*="smart-related-issues-panel"],
         body.gm-hide-header div.css-rjtezs:has([data-testid*="scope-Alert link"]),
         body.gm-hide-header div:has(> [data-testid*="scope-Alert link"]),
-        body.gm-hide-header [data-testid*="scope-Alert link"] {
+        body.gm-hide-header [data-testid*="scope-Alert link"],
+        /* Agents panel & Agents button */
+        body.gm-hide-header div.css-rjtezs:has([data-testid^="ai-agent-sessions."]),
+        body.gm-hide-header [data-testid="ai-agent-sessions.title-container"],
+        body.gm-hide-header [data-testid="ai-agent-sessions.agent-panel-empty-state"],
+        body.gm-hide-header div[role="presentation"]:has(> [data-testid="ai-agents-button.button"]),
+        body.gm-hide-header [data-testid="ai-agents-button.button"] {
             display: none !important;
         }
 
@@ -67,6 +73,24 @@
             const panel = alertLink.closest('.css-rjtezs') || alertLink.parentElement || alertLink
             if (panel && !panel.classList.contains('gm-hidden-clutter')) {
                 panel.classList.add('gm-hidden-clutter')
+            }
+        }
+
+        // 3. Agents panel
+        const agentsTitle = document.querySelector('[data-testid="ai-agent-sessions.title-container"]')
+        if (agentsTitle) {
+            const panel = agentsTitle.closest('.css-rjtezs') || agentsTitle.parentElement || agentsTitle
+            if (panel && !panel.classList.contains('gm-hidden-clutter')) {
+                panel.classList.add('gm-hidden-clutter')
+            }
+        }
+
+        // 4. Agents button
+        const agentsBtn = document.querySelector('[data-testid="ai-agents-button.button"]')
+        if (agentsBtn) {
+            const wrapper = agentsBtn.closest('[role="presentation"]') || agentsBtn
+            if (!wrapper.classList.contains('gm-hidden-clutter')) {
+                wrapper.classList.add('gm-hidden-clutter')
             }
         }
     }
