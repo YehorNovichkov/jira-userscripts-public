@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.8.1
+// @version     1.8.2
 // @author      oggmancuc
 // @description Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 // ==/UserScript==
@@ -18,6 +18,14 @@
     const COLOR_OLD = { r: 107, g: 119, b: 140 } // Gray
     const STORAGE_KEY = 'gm_jira_last_viewed'
     const RETENTION_DAYS = 30 // How many days to remember a ticket was viewed.
+    const JIRA_TIME_ZONE = 'Europe/Copenhagen' // Time zone set in your Jira profile settings.
+
+    const tzFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: JIRA_TIME_ZONE,
+        hourCycle: 'h23',
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: 'numeric', second: 'numeric',
+    })
 
     // --- LOCALSTORAGE HELPERS ---
     function getLastViewedTimes() {
@@ -74,7 +82,7 @@
     }
 
     function parseJiraDate(dateStr) {
-        // Handles format like "21/Apr/26 10:48" (assuming GMT+2 time)
+        // Handles format like "21/Apr/26 10:48" (in JIRA_TIME_ZONE)
         const monthMap = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 }
         const parts = dateStr.split(/[\s/:]+/) // e.g., ["21", "Apr", "26", "10", "48"]
         if (parts.length < 5) return null
@@ -88,15 +96,22 @@
         if (monthIndex === undefined) return null
 
         // 1. Treat the parsed time as if it were UTC
-        const dateAsUtc = new Date(Date.UTC(year, monthIndex, day, hour, minute))
+        const asUtcMs = Date.UTC(year, monthIndex, day, hour, minute)
 
-        // 2. Calculate offset at this specific date/time
-        const tzStr = dateAsUtc.toLocaleString('en-US', { timeZone: 'Etc/GMT-2' })
-        const utcStr = dateAsUtc.toLocaleString('en-US', { timeZone: 'UTC' })
-        const tzOffsetMs = new Date(tzStr).getTime() - new Date(utcStr).getTime()
+        // 2. Shift by the Jira time zone offset (DST-aware). The second pass corrects
+        //    the offset for times close to a DST switch.
+        let ts = asUtcMs - getTimeZoneOffsetMs(asUtcMs)
+        ts = asUtcMs - getTimeZoneOffsetMs(ts)
+        return new Date(ts)
+    }
 
-        // 3. Shift the time backwards by the offset to get the true absolute timestamp
-        return new Date(dateAsUtc.getTime() - tzOffsetMs)
+    // Offset of JIRA_TIME_ZONE from UTC at the given instant, e.g. +2h in summer, +1h in winter for Copenhagen
+    function getTimeZoneOffsetMs(timestampMs) {
+        const parts = {}
+        tzFormatter.formatToParts(new Date(timestampMs)).forEach((p) => { parts[p.type] = p.value })
+        const hour = parts.hour === '24' ? 0 : parseInt(parts.hour, 10)
+        const zonedAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, hour, parts.minute, parts.second)
+        return zonedAsUtc - Math.floor(timestampMs / 1000) * 1000
     }
 
     function getRelativeTimeString(diffMs) {
