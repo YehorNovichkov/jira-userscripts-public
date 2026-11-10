@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.5.0
+// @version     1.5.1
 // @author      oggmancuc
 // @description Adds a button to insert a standard signature in the Jira comment editor.
 // ==/UserScript==
@@ -28,7 +28,19 @@
 
         // 2. Logic to check if we need a new paragraph/breakline
         const lastChild = editor.lastElementChild
-        const needsNewPara = lastChild && lastChild.innerText.trim().length > 0
+        const lastText = lastChild ? lastChild.textContent : ''
+        const needsNewPara = lastChild && lastText.trim().length > 0
+
+        // If the last line only holds whitespace (e.g. a single space), clear it first.
+        // Otherwise the pasted paragraph gets merged into that non-empty line, which
+        // splits the first signature row off into its own paragraph.
+        if (lastChild && !needsNewPara && lastText.length > 0) {
+            const wsRange = document.createRange()
+            wsRange.selectNodeContents(lastChild)
+            sel.removeAllRanges()
+            sel.addRange(wsRange)
+            document.execCommand('delete', false)
+        }
 
         if (needsNewPara) {
             // Equivalent to hitting 'Enter'
