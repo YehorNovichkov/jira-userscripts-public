@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.2
+// @version     1.2.3
 // @author      oggmancuc
 // @description Visually separates monitoring alerts from human requests, and cleans up long subject lines.
 // ==/UserScript==
@@ -20,6 +20,7 @@
     const PATTERNS_TO_STRIP = [
         /\[Checkmk\] PROBLEM (Service|Host) Alert:(.*?\/MSSQL SP:)?/g,
         / is CRITICAL/g,
+        /^\s*\[Prometheus\]:\s*/,
     ]
 
     // --- CSS INJECTION ---
