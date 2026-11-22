@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.4
+// @version     1.2.5
 // @author      oggmancuc
 // @description Visually separates monitoring alerts from human requests, and cleans up long subject lines.
 // ==/UserScript==
@@ -48,7 +48,8 @@
                 summaryEl.closest('div._1fjgglyw')
             if (!row) return
 
-            if (row.dataset.gmCategorized) return
+            // Keyed on the text we left behind, so a summary React updates later gets processed again
+            if (row.dataset.gmCategorized === summaryEl.textContent) return
 
             const reporterEl = row.querySelector('div[data-testid*="-reporter"]')
 
@@ -66,18 +67,19 @@
                 row.classList.add('gm-bot-row')
             }
 
-            // Clean up the summary text by stripping any matching patterns
+            // Strip patterns by editing the existing text nodes in place. Setting textContent would
+            // swap in a new node, and React's later updates would go to the detached old one.
             const textTarget = summaryEl.querySelector('a') || summaryEl
-            const originalText = textTarget.textContent
-            let newText = originalText
-            for (const pattern of PATTERNS_TO_STRIP) {
-                newText = newText.replace(pattern, '')
-            }
-            if (newText !== originalText) {
-                textTarget.textContent = newText.trim()
+            const walker = document.createTreeWalker(textTarget, NodeFilter.SHOW_TEXT)
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                let newText = node.nodeValue
+                for (const pattern of PATTERNS_TO_STRIP) {
+                    newText = newText.replace(pattern, '')
+                }
+                if (newText !== node.nodeValue) node.nodeValue = newText.trim()
             }
 
-            row.dataset.gmCategorized = 'true'
+            row.dataset.gmCategorized = summaryEl.textContent
         })
     }
 

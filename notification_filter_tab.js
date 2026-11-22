@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.1
+// @version     1.1.2
 // @author      oggmancuc
 // @description Hides notifications from your own actions and Automation for Jira, placing them in a dedicated 'Self & Automation' tab.
 // ==/UserScript==
@@ -18,7 +18,7 @@
         // Names of actors whose notifications should be filtered out from Direct/Watching
         // and routed into the custom tab. Case-insensitive matching.
         filterActors: [
-            'Yehor Novichkov',
+            'Your Name', // Replace with your Jira display name
             'Automation for Jira'
         ],
 
@@ -147,7 +147,7 @@
         }
 
         // 2. Main action link aria-label, e.g. "Automation for Jira assigned a work item to you 5 minutes ago"
-        // or "Yehor Novichkov commented on a work item 16 minutes ago"
+        // or "Jane Doe commented on a work item 16 minutes ago"
         const mainAction = itemContainer.querySelector('a[data-testid="notification-item-main-action"]')
         if (mainAction) {
             const label = mainAction.getAttribute('aria-label') || ''
@@ -157,7 +157,7 @@
             }
         }
 
-        // 3. Summary heading: e.g. "<h4><span>Yehor Novichkov commented on a work item</span>...</h4>"
+        // 3. Summary heading: e.g. "<h4><span>Jane Doe commented on a work item</span>...</h4>"
         const headingSpan = itemContainer.querySelector('h4[id*="_summary"] > span:first-child, h4 > span:first-child')
         if (headingSpan) {
             const text = headingSpan.textContent.trim()

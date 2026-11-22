@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.8.3
+// @version     1.8.4
 // @author      oggmancuc
 // @description Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 // ==/UserScript==
@@ -149,7 +149,7 @@
             // --- Data Extraction ---
             let ticketId = null
             const testId = cell.getAttribute('data-testid') || ''
-            const ticketIdMatch = testId.match(/row([A-Z]+-\d+)-/)
+            const ticketIdMatch = testId.match(/row([A-Z][A-Z0-9_]*-\d+)-/)
 
             if (ticketIdMatch && ticketIdMatch[1]) {
                 ticketId = ticketIdMatch[1]
@@ -229,8 +229,8 @@
         const currentUrl = window.location.href
         if (currentUrl === lastProcessedTicketUrl) return
 
-        // Regex to find a ticket ID like PROJ-123 in the URL
-        const ticketMatch = currentUrl.match(/\/browse\/([A-Z]+-\d+)/) || currentUrl.match(/\/projects\/[A-Z]+\/queues\/.*\/([A-Z]+-\d+)/)
+        // Ticket ID like PROJ-123 in the URL. Keys may contain digits after the first letter (OPS2-14).
+        const ticketMatch = currentUrl.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)/) || currentUrl.match(/\/projects\/[A-Z][A-Z0-9_]*\/queues\/.*\/([A-Z][A-Z0-9_]*-\d+)/)
 
         if (ticketMatch && ticketMatch[1]) {
             const ticketId = ticketMatch[1]

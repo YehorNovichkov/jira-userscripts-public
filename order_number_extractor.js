@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.2
+// @version     1.3.0
 // @author      oggmancuc
 // @description Extracts 10xx/30xx orders from the issue description and lists them for quick copying.
 // ==/UserScript==
@@ -136,49 +136,39 @@
         wrapper.appendChild(listContainer)
         anchor.after(wrapper)
 
-        // Highlight orders in the text
-        const walker = document.createTreeWalker(source, NodeFilter.SHOW_TEXT, null, false)
-        let node
-        const nodesToReplace = []
-        while ((node = walker.nextNode())) {
-            // Skip our own UI elements
-            if (node.parentElement && node.parentElement.closest('.gm-order-wrapper')) continue
-            if (node.parentElement && node.parentElement.classList.contains('gm-order-highlight')) continue
-            
-            if (node.nodeValue.match(ORDER_REGEX)) {
-                nodesToReplace.push(node)
-            }
-        }
-        
-        // Build nodes instead of innerHTML: the ticket text is user input and must never be parsed as HTML
-        nodesToReplace.forEach(textNode => {
-            const span = document.createElement('span')
-            for (const part of splitOrders(textNode.nodeValue)) {
-                if (!part.isOrder) {
-                    span.append(part.text)
-                    continue
-                }
-                const hl = document.createElement('span')
-                hl.className = 'gm-order-highlight'
-                hl.style.cssText = 'color: var(--ds-text-success, #36B37E); background-color: var(--ds-background-success-subtle, rgba(54, 179, 126, 0.15)); padding: 0 4px; border-radius: 3px; font-family: monospace;'
-                hl.textContent = part.text
-                span.append(hl)
-            }
-            textNode.parentNode.replaceChild(span, textNode)
-        })
+        highlightOrders(source)
     }
 
-    // Splits text into plain and order-number pieces that join back to the exact input. Tested in test.js.
-    function splitOrders(text) {
-        const parts = []
-        let last = 0
-        for (const m of text.matchAll(ORDER_REGEX)) {
-            if (m.index > last) parts.push({ text: text.slice(last, m.index), isOrder: false })
-            parts.push({ text: m[0], isOrder: true })
-            last = m.index + m[0].length
+    // Colors order numbers with the CSS Custom Highlight API. It paints text ranges without
+    // touching the DOM, so ticket text is never parsed as HTML and React keeps its own nodes.
+    // Browsers without the API (Firefox before 140) just skip the highlight; the list above still works.
+    function highlightOrders(source) {
+        if (!window.CSS?.highlights || typeof Highlight === 'undefined') return
+        if (!document.getElementById('gm-order-highlight-style')) {
+            const style = document.createElement('style')
+            style.id = 'gm-order-highlight-style'
+            style.textContent = '::highlight(gm-order) { color: var(--ds-text-success, #36B37E); background-color: var(--ds-background-success-subtle, rgba(54, 179, 126, 0.15)); }'
+            document.head.appendChild(style)
         }
-        if (last < text.length) parts.push({ text: text.slice(last), isOrder: false })
-        return parts
+
+        const ranges = []
+        const walker = document.createTreeWalker(source, NodeFilter.SHOW_TEXT)
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (node.parentElement?.closest('.gm-order-wrapper')) continue // our own list
+            for (const [start, end] of findOrderOffsets(node.nodeValue)) {
+                const range = new Range()
+                range.setStart(node, start)
+                range.setEnd(node, end)
+                ranges.push(range)
+            }
+        }
+        // set() replaces the previous ticket's ranges
+        CSS.highlights.set('gm-order', new Highlight(...ranges))
+    }
+
+    // [start, end] offsets of every order number in the text. Tested in test.js.
+    function findOrderOffsets(text) {
+        return [...text.matchAll(ORDER_REGEX)].map((m) => [m.index, m.index + m[0].length])
     }
 
     // MutationObserver is vital for Jira because it's a Single Page App (SPA).

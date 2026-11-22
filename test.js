@@ -5,24 +5,22 @@ const assert = require('assert')
 
 const src = fs.readFileSync(__dirname + '/order_number_extractor.js', 'utf8')
 const regexLine = src.match(/const ORDER_REGEX = .*/)[0]
-const fnSource = src.match(/function splitOrders\(text\) \{[\s\S]*?\n    \}/)[0]
-const splitOrders = new Function(`${regexLine}\n${fnSource}\nreturn splitOrders`)()
+const fnSource = src.match(/function findOrderOffsets\(text\) \{[\s\S]*?\n    \}/)[0]
+const findOrderOffsets = new Function(`${regexLine}\n${fnSource}\nreturn findOrderOffsets`)()
 
-const join = (parts) => parts.map((p) => p.text).join('')
-const orders = (parts) => parts.filter((p) => p.isOrder).map((p) => p.text)
+const orders = (text) => findOrderOffsets(text).map(([s, e]) => text.slice(s, e))
 
-// HTML in ticket text stays plain text and the pieces rebuild the exact input
-const evil = '<img src=x onerror=alert(1)> see 1012345678 and 301234567 end'
-const parts = splitOrders(evil)
-assert.strictEqual(join(parts), evil)
-assert.deepStrictEqual(orders(parts), ['1012345678', '301234567'])
-assert.ok(parts.some((p) => !p.isOrder && p.text.includes('<img')))
+// Offsets point exactly at the numbers, surrounding HTML-looking text is ignored
+assert.deepStrictEqual(orders('<img src=x onerror=alert(1)> see 1012345678 and 301234567 end'), ['1012345678', '301234567'])
 
-// Edges: order at start/end, back to back, no orders, wrong prefix or length
-assert.deepStrictEqual(splitOrders('1012345678'), [{ text: '1012345678', isOrder: true }])
-assert.deepStrictEqual(orders(splitOrders('1012345678,3012345678')), ['1012345678', '3012345678'])
-assert.deepStrictEqual(splitOrders('no orders'), [{ text: 'no orders', isOrder: false }])
-assert.deepStrictEqual(orders(splitOrders('2012345678 10123456 101234567890')), [])
-assert.deepStrictEqual(splitOrders(''), [])
+// Edges: order at start/end, back to back, no orders, wrong prefix or length, empty
+assert.deepStrictEqual(findOrderOffsets('1012345678'), [[0, 10]])
+assert.deepStrictEqual(orders('1012345678,3012345678'), ['1012345678', '3012345678'])
+assert.deepStrictEqual(findOrderOffsets('no orders'), [])
+assert.deepStrictEqual(orders('2012345678 10123456 101234567890'), [])
+assert.deepStrictEqual(findOrderOffsets(''), [])
+
+// Repeated calls give the same result (the regex is global, so lastIndex must not leak)
+assert.deepStrictEqual(orders('x 1012345678'), orders('x 1012345678'))
 
 console.log('ok')

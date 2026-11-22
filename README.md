@@ -13,6 +13,9 @@
 4. Paste the raw URL in the "Import from URL" field and click "Install".
 5. In the script's settings, check if the "Update URL" was correctly set to enable auto-updates.
 
+**Customizing settings:**
+Some scripts have settings at the top of the code that you are expected to edit (signature text, your name, Jira time zone, hidden columns, queue name, bot keywords). An update replaces the whole file with the version from this repo, so **your edits are lost on every update**. If you change a script's settings, either turn off updates for that script in your extension, or re-apply your edits after each update.
+
 ### Scripts
 
 * **`bot_human_highlighter.js`**: Visually separates monitoring alerts from human requests, and cleans up long subject lines.

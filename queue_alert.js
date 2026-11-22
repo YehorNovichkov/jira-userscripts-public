@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.2
+// @version     1.1.3
 // @author      oggmancuc
 // @description Plays an alert sound when tickets appear in the "Waiting for Triage" queue. Compact icon button with an interactive settings dropdown to configure chime/alarm modes and preview sounds.
 // ==/UserScript==
@@ -756,7 +756,7 @@
                 startInterval()
             }
 
-            if (!isOnTargetQueue() && intervalId !== null) {
+            if (!isOnTargetQueue()) {
                 stopInterval()
                 removeButton()
             }
