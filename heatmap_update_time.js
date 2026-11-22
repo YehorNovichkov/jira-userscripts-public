@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.8.2
+// @version     1.8.3
 // @author      oggmancuc
 // @description Colors tickets by update age, adds unread dot, and auto-cleans old view data.
 // ==/UserScript==
@@ -242,7 +242,14 @@
     // --- INITIALIZATION ---
     cleanupOldViewedTimes() // Run cleanup on script start.
 
-    const listObserver = new MutationObserver(processTimestamps)
+    // Run at most once per frame: Jira mutates the DOM constantly
+    let scheduled = false
+    const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => { scheduled = false; processTimestamps() })
+    }
+    const listObserver = new MutationObserver(schedule)
     listObserver.observe(document.body, { childList: true, subtree: true })
 
     // Periodically update the relative time display

@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.3.1
+// @version     1.3.2
 // @author      oggmancuc
 // @description Duplicates starred queues into a neat, responsive horizontal bar in the queue header with drag-to-reorder, local renaming, and single-row expand/collapse.
 // ==/UserScript==
@@ -103,6 +103,22 @@
 
     function getRenderedKeys(queues) {
         return queues.map(q => `${q.href}:${customRenames[q.href] || q.name}`).join('|')
+    }
+
+    function chipTitle(q, count) {
+        const renamed = customRenames[q.href]
+        const name = renamed ? `${renamed} (original: "${q.name}")` : q.name
+        return `${name} (${count})\nDouble-click to rename • Drag to reorder`
+    }
+
+    function setChipActive(chip, active) {
+        chip.classList.toggle('gm-active', active)
+        if (active) chip.setAttribute('aria-current', 'page')
+        else chip.removeAttribute('aria-current')
+    }
+
+    function findChip(container, href) {
+        return container.querySelector(`.gm-queue-chip[data-href="${CSS.escape(href)}"]`)
     }
 
     // Drag & drop state
@@ -214,7 +230,6 @@
                 text-decoration: none !important;
                 white-space: nowrap;
                 flex-shrink: 0;
-                //cursor: grab;
                 box-sizing: border-box;
                 transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
             }
@@ -227,15 +242,11 @@
                 box-shadow: 0 2px 5px rgba(9, 30, 66, 0.08);
             }
 
-            .gm-queue-chip:active {
-                //cursor: grabbing;
-            }
 
             .gm-queue-chip.gm-dragging {
                 opacity: 0.35 !important;
                 border-style: dashed !important;
                 transform: scale(0.96);
-                //cursor: grabbing !important;
             }
 
             /* Active / selected queue */
@@ -544,22 +555,13 @@
                     const chipsContainer = bar.querySelector('.gm-chips-container')
                     if (chipsContainer) {
                         for (const q of cachedQueues) {
-                            const chip = chipsContainer.querySelector(`.gm-queue-chip[data-href="${q.href}"]`)
+                            const chip = findChip(chipsContainer, q.href)
                             if (!chip) continue
                             const badge = chip.querySelector('.gm-queue-badge')
                             if (badge && q.count !== undefined) {
                                 badge.textContent = q.count
-                                if (q.count === '0') {
-                                    badge.classList.add('gm-badge-zero')
-                                } else {
-                                    badge.classList.remove('gm-badge-zero')
-                                }
-                                const displayName = customRenames[q.href] || q.name
-                                if (customRenames[q.href]) {
-                                    chip.title = `${displayName} (original: "${q.name}") (${q.count})\nDouble-click to rename • Drag to reorder`
-                                } else {
-                                    chip.title = `${displayName} (${q.count})\nDouble-click to rename • Drag to reorder`
-                                }
+                                badge.classList.toggle('gm-badge-zero', q.count === '0')
+                                chip.title = chipTitle(q, q.count)
                             }
                         }
                         checkOverflow(bar)
@@ -741,26 +743,8 @@
         if (/\/servicedesk\/projects\/[^/]+\/queues(?:\/|$)/i.test(pathname)) {
             return true
         }
-        // 2. Service Desk project issue view or project root:
-        // e.g. /jira/servicedesk/projects/<space name>/issues/... or /jira/servicedesk/projects/<space name>/
-        if (/\/servicedesk\/projects\/[^/]+(?:\/(?:issues(?:\/|$)|$|\?))/i.test(pathname)) {
-            return !!(
-                document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]') ||
-                document.querySelector('[data-testid*="jsm-queues-menu"]')
-            )
-        }
-        // 3. Browse issue view when within a JSM project context (JSM queues menu present in sidebar):
-        if (/\/browse\/[A-Z]+-\d+/i.test(pathname)) {
-            return !!(
-                document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]') ||
-                document.querySelector('[data-testid*="jsm-queues-menu"]')
-            )
-        }
-        // 4. Any page where the JSM queues menu trigger or JSM queues horizontal nav exists in the DOM:
-        if (document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"], [data-testid*="jsm-queues-menu"]')) {
-            return true
-        }
-        return false
+        // 2. Any page (project root, issue view, /browse/KEY-1) with the JSM queues menu or queue nav in the DOM
+        return !!document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"], [data-testid*="jsm-queues-menu"]')
     }
 
     function removeBar() {
@@ -771,47 +755,39 @@
     }
 
     // ── Mount Bar In Between Title & Action Buttons ─────────────────────
-    function mountBarInHeader(bar) {
-        // 1. Locate horizontal nav header
-        const nav = document.querySelector(
-            '[data-testid="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-vc="navigation-apps.horizontal-nav.horizontal-nav-jsm.queue"], [data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]'
-        )
+    // Places the bar between the h1's title wrapper and the toolbar (first sibling holding a button)
+    function mountBesideTitle(h1, bar) {
+        const titleWrapper = h1.closest('div[class*="_16jlkb7n"]') || h1.parentElement
+        const rowContainer = titleWrapper?.parentElement
+        if (!rowContainer) return false
 
-        // 2. If nav exists with h1, mount inside nav header (Queue Page)
-        if (nav) {
-            const h1 = nav.querySelector('h1')
-            if (h1) {
-                const titleWrapper = h1.closest('div[class*="_16jlkb7n"]') || h1.parentElement
-                if (titleWrapper) {
-                    const rowContainer = titleWrapper.parentElement || nav
-                    let toolbarWrapper = null
-                    for (const child of rowContainer.children) {
-                        if (child === titleWrapper || child === bar) continue
-                        if (
-                            child.querySelector?.('#gm-queue-alert-toggle') ||
-                            child.querySelector?.('button[aria-label*="Star"], [data-is-favorite]') ||
-                            child.querySelector?.('button')
-                        ) {
-                            toolbarWrapper = child
-                            break
-                        }
-                    }
-
-                    titleWrapper.style.flexShrink = '0'
-                    if (toolbarWrapper) {
-                        toolbarWrapper.style.flexShrink = '0'
-                        if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
-                            rowContainer.insertBefore(bar, toolbarWrapper)
-                        }
-                    } else {
-                        if (titleWrapper.nextElementSibling !== bar || bar.parentElement !== rowContainer) {
-                            titleWrapper.insertAdjacentElement('afterend', bar)
-                        }
-                    }
-                    return true
-                }
+        let toolbarWrapper = null
+        for (const child of rowContainer.children) {
+            if (child === titleWrapper || child === bar) continue
+            // The alert toggle and Star are buttons, so 'button' already covers them
+            if (child.querySelector('button, [data-is-favorite]')) {
+                toolbarWrapper = child
+                break
             }
         }
+
+        titleWrapper.style.flexShrink = '0'
+        if (toolbarWrapper) {
+            toolbarWrapper.style.flexShrink = '0'
+            if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
+                rowContainer.insertBefore(bar, toolbarWrapper)
+            }
+        } else if (titleWrapper.nextElementSibling !== bar || bar.parentElement !== rowContainer) {
+            titleWrapper.insertAdjacentElement('afterend', bar)
+        }
+        return true
+    }
+
+    function mountBarInHeader(bar) {
+        // 1. Horizontal nav header with h1 (Queue Page)
+        const nav = document.querySelector('[data-testid*="horizontal-nav-jsm.queue"], [data-vc*="horizontal-nav-jsm.queue"]')
+        const navH1 = nav?.querySelector('h1')
+        if (navH1 && mountBesideTitle(navH1, bar)) return true
 
         // 3. Sticky issue header (#jira-issue-header) on ticket views:
         // Position the bar right ABOVE the ticket number and ticket name row,
@@ -866,39 +842,7 @@
 
         // 5. Final fallback to h1, but avoid mounting inside elements hidden by header proxy
         const h1 = document.querySelector('h1:not([data-testid*="issue-field-summary"])') || document.querySelector('h1')
-        if (!h1) return false
-
-        const titleWrapper = h1.closest('div[class*="_16jlkb7n"]') || h1.parentElement
-        if (!titleWrapper) return false
-        const rowContainer = titleWrapper.parentElement
-        if (!rowContainer) return false
-
-        let toolbarWrapper = null
-        for (const child of rowContainer.children) {
-            if (child === titleWrapper || child === bar) continue
-            if (
-                child.querySelector?.('#gm-queue-alert-toggle') ||
-                child.querySelector?.('button[aria-label*="Star"], [data-is-favorite]') ||
-                child.querySelector?.('button')
-            ) {
-                toolbarWrapper = child
-                break
-            }
-        }
-
-        titleWrapper.style.flexShrink = '0'
-        if (toolbarWrapper) {
-            toolbarWrapper.style.flexShrink = '0'
-            if (bar.nextElementSibling !== toolbarWrapper || bar.parentElement !== rowContainer) {
-                rowContainer.insertBefore(bar, toolbarWrapper)
-            }
-            return true
-        } else {
-            if (titleWrapper.nextElementSibling !== bar || bar.parentElement !== rowContainer) {
-                titleWrapper.insertAdjacentElement('afterend', bar)
-            }
-            return true
-        }
+        return !!h1 && mountBesideTitle(h1, bar)
     }
 
     // ── Check Bar Overflow & Toggle Button Visibility ─────────────────
@@ -963,13 +907,8 @@
             const badge = chip.querySelector('.gm-queue-badge')
             const countText = badge ? badge.textContent : (q.count || '0')
 
-            if (customRenames[q.href]) {
-                chip.classList.add('gm-is-renamed')
-                chip.title = `${effectiveName} (original: "${q.name}") (${countText})\nDouble-click to rename • Drag to reorder`
-            } else {
-                chip.classList.remove('gm-is-renamed')
-                chip.title = `${effectiveName} (${countText})\nDouble-click to rename • Drag to reorder`
-            }
+            chip.classList.toggle('gm-is-renamed', !!customRenames[q.href])
+            chip.title = chipTitle(q, countText)
 
             input.remove()
             chip.setAttribute('draggable', 'true')
@@ -1122,12 +1061,8 @@
                 chip.setAttribute('draggable', 'true')
 
                 const displayName = customRenames[q.href] || q.name
-                if (customRenames[q.href]) {
-                    chip.classList.add('gm-is-renamed')
-                    chip.title = `${displayName} (original: "${q.name}") (${q.count || '0'})\nDouble-click to rename • Drag to reorder`
-                } else {
-                    chip.title = `${displayName} (${q.count || '0'})\nDouble-click to rename • Drag to reorder`
-                }
+                chip.classList.toggle('gm-is-renamed', !!customRenames[q.href])
+                chip.title = chipTitle(q, q.count || '0')
 
                 // Title label
                 const titleSpan = document.createElement('span')
@@ -1225,8 +1160,9 @@
                     chip.classList.add('gm-active')
 
                     // Find matching sidebar link to trigger Jira client-side SPA routing
+                    const href = CSS.escape(q.href)
                     const sidebarLink = document.querySelector(
-                        `[data-testid*="jsm-queues-menu"] ~ * a[href="${q.href}"], [role="group"] a[href="${q.href}"], a[href="${q.href}"]`
+                        `[data-testid*="jsm-queues-menu"] ~ * a[href="${href}"], [role="group"] a[href="${href}"], a[href="${href}"]`
                     )
                     if (sidebarLink && typeof sidebarLink.click === 'function') {
                         e.preventDefault()
@@ -1240,17 +1176,10 @@
 
         // In-place update of active state & badges
         for (const q of queues) {
-            const chip = chipsContainer.querySelector(`.gm-queue-chip[data-href="${q.href}"]`)
+            const chip = findChip(chipsContainer, q.href)
             if (!chip) continue
 
-            // Active state
-            if (isCurrentQueue(q.href)) {
-                chip.classList.add('gm-active')
-                chip.setAttribute('aria-current', 'page')
-            } else {
-                chip.classList.remove('gm-active')
-                chip.removeAttribute('aria-current')
-            }
+            setChipActive(chip, isCurrentQueue(q.href))
 
             // Count badge
             const badge = chip.querySelector('.gm-queue-badge')
@@ -1258,18 +1187,9 @@
                 const countText = q.count || '0'
                 if (badge.textContent !== countText) {
                     badge.textContent = countText
-                    const displayName = customRenames[q.href] || q.name
-                    if (customRenames[q.href]) {
-                        chip.title = `${displayName} (original: "${q.name}") (${countText})\nDouble-click to rename • Drag to reorder`
-                    } else {
-                        chip.title = `${displayName} (${countText})\nDouble-click to rename • Drag to reorder`
-                    }
+                    chip.title = chipTitle(q, countText)
                 }
-                if (countText === '0') {
-                    badge.classList.add('gm-badge-zero')
-                } else {
-                    badge.classList.remove('gm-badge-zero')
-                }
+                badge.classList.toggle('gm-badge-zero', countText === '0')
             }
         }
 
@@ -1298,16 +1218,7 @@
 
         const bar = document.getElementById(BAR_ID)
         if (bar) {
-            bar.querySelectorAll('.gm-queue-chip').forEach(chip => {
-                const href = chip.dataset.href
-                if (isCurrentQueue(href)) {
-                    chip.classList.add('gm-active')
-                    chip.setAttribute('aria-current', 'page')
-                } else {
-                    chip.classList.remove('gm-active')
-                    chip.removeAttribute('aria-current')
-                }
-            })
+            bar.querySelectorAll('.gm-queue-chip').forEach(chip => setChipActive(chip, isCurrentQueue(chip.dataset.href)))
         }
         if (cachedQueues.length > 0) {
             fetchLiveQueueCounts(cachedQueues)

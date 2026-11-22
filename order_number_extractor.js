@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.0
+// @version     1.2.2
 // @author      oggmancuc
 // @description Extracts 10xx/30xx orders from the issue description and lists them for quick copying.
 // ==/UserScript==
@@ -40,11 +40,19 @@
         // Prevent running if anchor/source missing, or if we already added the list to THIS anchor
         if (!anchor || !source || anchor.nextElementSibling?.classList.contains('gm-order-wrapper')) return
 
+        // innerText forces a layout, so skip it while the column text is unchanged since the last empty scan.
+        // textContent length is cheap and changes when the description loads or the ticket switches.
+        const textLength = String(source.textContent.length)
+        if (anchor.dataset.gmScannedLength === textLength) return
+
         // Get all text from the left column
         const textContent = source.innerText
         const matches = textContent.match(ORDER_REGEX)
 
-        if (!matches) return
+        if (!matches) {
+            anchor.dataset.gmScannedLength = textLength
+            return
+        }
 
         // Filter for unique order numbers
         const uniqueOrders = [...new Set(matches)]
@@ -142,21 +150,47 @@
             }
         }
         
+        // Build nodes instead of innerHTML: the ticket text is user input and must never be parsed as HTML
         nodesToReplace.forEach(textNode => {
             const span = document.createElement('span')
-            span.innerHTML = textNode.nodeValue.replace(ORDER_REGEX, (match) => {
-                return `<span class="gm-order-highlight" style="color: var(--ds-text-success, #36B37E); background-color: var(--ds-background-success-subtle, rgba(54, 179, 126, 0.15)); padding: 0 4px; border-radius: 3px; font-family: monospace;">${match}</span>`
-            })
+            for (const part of splitOrders(textNode.nodeValue)) {
+                if (!part.isOrder) {
+                    span.append(part.text)
+                    continue
+                }
+                const hl = document.createElement('span')
+                hl.className = 'gm-order-highlight'
+                hl.style.cssText = 'color: var(--ds-text-success, #36B37E); background-color: var(--ds-background-success-subtle, rgba(54, 179, 126, 0.15)); padding: 0 4px; border-radius: 3px; font-family: monospace;'
+                hl.textContent = part.text
+                span.append(hl)
+            }
             textNode.parentNode.replaceChild(span, textNode)
         })
     }
 
-    // MutationObserver is vital for Jira because it's a Single Page App (SPA)
-    const observer = new MutationObserver((mutations) => {
-        // If the anchor or the content container appears/changes, re-scan
-        if (document.querySelector(ANCHOR_ELEMENT)) {
-            findAndDisplayOrders()
+    // Splits text into plain and order-number pieces that join back to the exact input. Tested in test.js.
+    function splitOrders(text) {
+        const parts = []
+        let last = 0
+        for (const m of text.matchAll(ORDER_REGEX)) {
+            if (m.index > last) parts.push({ text: text.slice(last, m.index), isOrder: false })
+            parts.push({ text: m[0], isOrder: true })
+            last = m.index + m[0].length
         }
+        if (last < text.length) parts.push({ text: text.slice(last), isOrder: false })
+        return parts
+    }
+
+    // MutationObserver is vital for Jira because it's a Single Page App (SPA).
+    // Coalesce bursts of mutations into one scan per frame (innerText forces layout).
+    let scheduled = false
+    const observer = new MutationObserver(() => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => {
+            scheduled = false
+            findAndDisplayOrders()
+        })
     })
 
     observer.observe(document.body, { childList: true, subtree: true })

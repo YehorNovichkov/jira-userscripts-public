@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.2
+// @version     1.1.3
 // @author      oggmancuc
 // @description Automatically forces data refresh every minute on the "Waiting for Triage" queue. Compact icon button with an interactive dropdown for toggling, choosing Soft SPA or Hard Reload modes, and manual refresh.
 // ==/UserScript==
@@ -236,7 +236,7 @@
     async function executeRefresh(overrideMode = null) {
         if (isRefreshing) return
         isRefreshing = true
-        updateButtonState(true)
+        updateButtonState()
 
         const activeMode = overrideMode || refreshMode
 
@@ -596,11 +596,11 @@
         document.head.appendChild(style)
     }
 
-    function updateButtonState(forceRefreshing = false) {
+    function updateButtonState() {
         const btn = document.getElementById(BUTTON_ID)
         if (!btn) return
 
-        if (forceRefreshing || isRefreshing) {
+        if (isRefreshing) {
             btn.className = 'gm-refresh-active'
             btn.innerHTML = '<span class="gm-refresh-spin">🔄</span>'
             btn.title = 'Queue Auto Refresh: Refreshing now...'
@@ -634,9 +634,82 @@
         updatePopoverContent()
     }
 
+    // Static markup is built once; later calls only patch the dynamic bits.
+    // Rebuilding innerHTML every second swallowed clicks landing mid-rebuild.
+    function buildPopover(popover) {
+        popover.innerHTML = `
+            <div class="gm-pop-header">
+                <span class="gm-pop-title">Auto Refresh</span>
+                <span class="gm-pop-badge" data-ref="badge"></span>
+            </div>
+
+            <label class="gm-switch-row" id="gm-refresh-switch-row">
+                <div class="gm-switch-text">
+                    <span class="gm-switch-title">Auto Refresh</span>
+                    <span class="gm-switch-sub">Forces queue data retrieval every ${REFRESH_INTERVAL_SECONDS}s</span>
+                </div>
+                <div class="gm-toggle-switch">
+                    <input type="checkbox" id="gm-refresh-checkbox">
+                    <span class="gm-toggle-slider"></span>
+                </div>
+            </label>
+
+            <div class="gm-mode-group">
+                <div class="gm-mode-group-title">Refresh Method</div>
+
+                <div class="gm-mode-card" data-mode="soft">
+                    <span class="gm-card-icon">⚡</span>
+                    <div>
+                        <div class="gm-card-label">Soft SPA (Recommended)</div>
+                        <div class="gm-card-timing">Fast, no reload, keeps sound alerts alive</div>
+                    </div>
+                </div>
+
+                <div class="gm-mode-card" data-mode="reload">
+                    <span class="gm-card-icon">🔁</span>
+                    <div>
+                        <div class="gm-card-label">Hard Page Reload</div>
+                        <div class="gm-card-timing">Full browser reload, clears memory</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="gm-pop-footer">
+                <div class="gm-guard-status">
+                    <span class="gm-guard-dot" data-ref="dot"></span>
+                    <span data-ref="status"></span>
+                </div>
+                <button type="button" class="gm-now-btn" id="gm-pop-refresh-now" title="Force refresh right now (Shift-click to alternate mode)">
+                    <span>↻</span>
+                    <span>Refresh Now</span>
+                </button>
+            </div>
+        `
+
+        popover.querySelector('#gm-refresh-checkbox').addEventListener('change', handleToggle)
+
+        popover.querySelectorAll('.gm-mode-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const mode = card.dataset.mode
+                if (mode && mode !== refreshMode) {
+                    handleModeToggle(mode)
+                }
+            })
+        })
+
+        popover.querySelector('#gm-pop-refresh-now').addEventListener('click', (e) => {
+            if (e.shiftKey) {
+                executeRefresh(refreshMode === 'soft' ? 'reload' : 'soft')
+            } else {
+                executeRefresh()
+            }
+        })
+    }
+
     function updatePopoverContent() {
         const popover = document.getElementById(POPOVER_ID)
-        if (!popover) return
+        if (!popover || popover.style.display === 'none') return
+        if (!popover.firstElementChild) buildPopover(popover)
 
         let badgeClass = 'gm-badge-neutral'
         let badgeText = 'OFF'
@@ -661,85 +734,15 @@
             }
         }
 
-        const statusText = getActivityStatusText()
-
-        popover.innerHTML = `
-            <div class="gm-pop-header">
-                <span class="gm-pop-title">Auto Refresh</span>
-                <span class="gm-pop-badge ${badgeClass}">${badgeText}</span>
-            </div>
-
-            <label class="gm-switch-row" id="gm-refresh-switch-row">
-                <div class="gm-switch-text">
-                    <span class="gm-switch-title">Auto Refresh</span>
-                    <span class="gm-switch-sub">Forces queue data retrieval every 60s</span>
-                </div>
-                <div class="gm-toggle-switch">
-                    <input type="checkbox" id="gm-refresh-checkbox" ${refreshEnabled ? 'checked' : ''}>
-                    <span class="gm-toggle-slider"></span>
-                </div>
-            </label>
-
-            <div class="gm-mode-group">
-                <div class="gm-mode-group-title">Refresh Method</div>
-
-                <div class="gm-mode-card ${refreshMode === 'soft' ? 'gm-selected' : ''}" data-mode="soft">
-                    <span class="gm-card-icon">⚡</span>
-                    <div>
-                        <div class="gm-card-label">Soft SPA (Recommended)</div>
-                        <div class="gm-card-timing">Fast, no reload, keeps sound alerts alive</div>
-                    </div>
-                </div>
-
-                <div class="gm-mode-card ${refreshMode === 'reload' ? 'gm-selected' : ''}" data-mode="reload">
-                    <span class="gm-card-icon">🔁</span>
-                    <div>
-                        <div class="gm-card-label">Hard Page Reload</div>
-                        <div class="gm-card-timing">Full browser reload, clears memory</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="gm-pop-footer">
-                <div class="gm-guard-status">
-                    <span class="gm-guard-dot ${dotClass}"></span>
-                    <span>${statusText}</span>
-                </div>
-                <button type="button" class="gm-now-btn" id="gm-pop-refresh-now" title="Force refresh right now (Shift-click to alternate mode)">
-                    <span>↻</span>
-                    <span>Refresh Now</span>
-                </button>
-            </div>
-        `
-
-        // Attach event listeners
-        const checkbox = popover.querySelector('#gm-refresh-checkbox')
-        if (checkbox) {
-            checkbox.addEventListener('change', () => {
-                handleToggle()
-            })
-        }
-
-        const modeCards = popover.querySelectorAll('.gm-mode-card')
-        modeCards.forEach(card => {
-            card.addEventListener('click', () => {
-                const mode = card.dataset.mode
-                if (mode && mode !== refreshMode) {
-                    handleModeToggle(mode)
-                }
-            })
+        const badge = popover.querySelector('[data-ref="badge"]')
+        badge.className = `gm-pop-badge ${badgeClass}`
+        badge.textContent = badgeText
+        popover.querySelector('[data-ref="dot"]').className = `gm-guard-dot ${dotClass}`
+        popover.querySelector('[data-ref="status"]').textContent = getActivityStatusText()
+        popover.querySelector('#gm-refresh-checkbox').checked = refreshEnabled
+        popover.querySelectorAll('.gm-mode-card').forEach(card => {
+            card.classList.toggle('gm-selected', card.dataset.mode === refreshMode)
         })
-
-        const nowBtn = popover.querySelector('#gm-pop-refresh-now')
-        if (nowBtn) {
-            nowBtn.addEventListener('click', (e) => {
-                if (e.shiftKey) {
-                    executeRefresh(refreshMode === 'soft' ? 'reload' : 'soft')
-                } else {
-                    executeRefresh()
-                }
-            })
-        }
     }
 
     function handleToggle() {
@@ -773,8 +776,8 @@
             document.getElementById('gm-queue-alert-popover')?.style.setProperty('display', 'none')
             document.getElementById('gm-queue-alert-toggle')?.setAttribute('aria-expanded', 'false')
 
-            updatePopoverContent()
             popover.style.display = 'flex'
+            updatePopoverContent()
             btn?.setAttribute('aria-expanded', 'true')
         }
     }

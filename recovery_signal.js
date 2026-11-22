@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.0
+// @version     1.1.1
 // @author      oggmancuc
 // @description Adds a pulsing green indicator if the 'recovered' label is present on the issue.
 // ==/UserScript==
@@ -71,7 +71,6 @@
                 }
 
                 // Append it to the status bar (flex container)
-                const wrapper = statusContainer.querySelector('div[role="presentation"]') || statusContainer
                 statusContainer.style.display = 'flex'
                 statusContainer.style.alignItems = 'center'
                 statusContainer.appendChild(dot)
@@ -82,7 +81,14 @@
     }
 
     // Observe changes for SPA navigation
-    const observer = new MutationObserver(addRecoverySignal)
+    // Run at most once per frame: Jira mutates the DOM constantly
+    let scheduled = false
+    const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => { scheduled = false; addRecoverySignal() })
+    }
+    const observer = new MutationObserver(schedule)
     observer.observe(document.body, { childList: true, subtree: true })
 
     addRecoverySignal()

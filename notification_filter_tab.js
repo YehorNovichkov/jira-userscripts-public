@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.0
+// @version     1.1.1
 // @author      oggmancuc
 // @description Hides notifications from your own actions and Automation for Jira, placing them in a dedicated 'Self & Automation' tab.
 // ==/UserScript==
@@ -290,6 +290,11 @@
         applyNotificationFilter(drawer)
     }
 
+    // Write only on change: the observer watches aria-selected, so blind writes re-trigger it every frame
+    function setAttr(el, name, value) {
+        if (el.getAttribute(name) !== value) el.setAttribute(name, value)
+    }
+
     function syncTabAttributes(drawer) {
         const tablist = drawer.querySelector('[role="tablist"]')
         if (!tablist) return
@@ -300,28 +305,28 @@
         if (activeTabMode === 'filtered') {
             drawer.classList.add('gm-filtered-tab-active')
             if (customTab) {
-                customTab.setAttribute('aria-selected', 'true')
-                customTab.setAttribute('tabindex', '0')
+                setAttr(customTab, 'aria-selected', 'true')
+                setAttr(customTab, 'tabindex', '0')
             }
             nativeTabs.forEach(tab => {
                 if (tab.getAttribute('aria-selected') === 'true') {
                     lastActiveNativeTab = tab
                 }
-                tab.setAttribute('aria-selected', 'false')
-                tab.setAttribute('tabindex', '-1')
+                setAttr(tab, 'aria-selected', 'false')
+                setAttr(tab, 'tabindex', '-1')
             })
         } else {
             drawer.classList.remove('gm-filtered-tab-active')
             if (customTab) {
-                customTab.setAttribute('aria-selected', 'false')
-                customTab.setAttribute('tabindex', '-1')
+                setAttr(customTab, 'aria-selected', 'false')
+                setAttr(customTab, 'tabindex', '-1')
             }
 
             // Restore active state on native tab
             const activeNative = lastActiveNativeTab || nativeTabs[0]
             if (activeNative) {
-                activeNative.setAttribute('aria-selected', 'true')
-                activeNative.setAttribute('tabindex', '0')
+                setAttr(activeNative, 'aria-selected', 'true')
+                setAttr(activeNative, 'tabindex', '0')
             }
         }
     }
@@ -366,7 +371,7 @@
             const badge = customTab.querySelector('.gm-tab-badge')
             if (badge) {
                 if (totalFiltered > 0) {
-                    badge.textContent = totalFiltered
+                    if (badge.textContent !== String(totalFiltered)) badge.textContent = totalFiltered
                     badge.style.display = 'inline-flex'
                     badge.classList.toggle('has-unread', CONFIG.highlightUnread && unreadFiltered > 0)
                     badge.title = `${totalFiltered} filtered notification${totalFiltered > 1 ? 's' : ''}${unreadFiltered > 0 ? ` (${unreadFiltered} unread)` : ''}`

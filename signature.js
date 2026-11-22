@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.5.1
+// @version     1.5.2
 // @author      oggmancuc
 // @description Adds a button to insert a standard signature in the Jira comment editor.
 // ==/UserScript==
@@ -115,7 +115,14 @@
         })
     }
 
-    const observer = new MutationObserver(addToolbarButton)
+    // Run at most once per frame: Jira mutates the DOM constantly
+    let scheduled = false
+    const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => { scheduled = false; addToolbarButton() })
+    }
+    const observer = new MutationObserver(schedule)
     observer.observe(document.body, { childList: true, subtree: true })
 
     addToolbarButton()

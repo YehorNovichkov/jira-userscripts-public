@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.4.0
+// @version     1.4.1
 // @author      oggmancuc
 // @description Auto-expands the 'Log Work' modal and adds quick time buttons for logging.
 // ==/UserScript==
@@ -18,16 +18,11 @@
         '[data-testid="issue.common.component.log-time-modal.modal.form.time-spent"]',
     ]
 
-    function log(msg, obj = '') {
-        // Debug logs removed for production
-    }
-
     /**
      * This is the "Secret Sauce" for React apps.
      * It forces the value into the input in a way that React's internal state managers can't ignore.
      */
     function setReactInputValue(input, value) {
-        // log(`Attempting to set value "${value}" on input:`, input);
 
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
         nativeInputValueSetter.call(input, value)
@@ -40,7 +35,6 @@
         const changeEvent = new Event('change', { bubbles: true })
         input.dispatchEvent(changeEvent)
 
-        // log(`Value set. Current input value is: ${input.value}`);
     }
 
     function injectButtons(container) {
@@ -55,11 +49,9 @@
 
         const input = container.querySelector('input[type="text"]') || container.querySelector('input')
         if (!input) {
-            log("Container found, but couldn't find the <input> inside it yet.")
             return false
         }
 
-        // log('Target input found. Injecting buttons...');
 
         const btnWrapper = document.createElement('div')
         btnWrapper.className = 'gm-quick-log-container'
@@ -81,7 +73,6 @@
             `
 
             btn.addEventListener('click', (e) => {
-                log(`Button ${time} clicked.`)
                 e.preventDefault()
                 e.stopPropagation()
                 setReactInputValue(input, time)
@@ -109,16 +100,13 @@
     }
 
     function runLogic() {
-        // log('Modal detection triggered.');
 
         // 1. Expansion
         const expandBtn = document.querySelector(EXPAND_BTN_SELECTOR)
         if (expandBtn) {
             const isExpanded = expandBtn.getAttribute('aria-expanded') === 'true'
-            // log(`Expand button state: ${isExpanded ? 'Already Expanded' : 'Collapsed'}`);
 
             if (!isExpanded) {
-                // log('Clicking expand button...');
                 expandBtn.click()
             }
         }
@@ -164,7 +152,6 @@
         }
     })
 
-    log('Script started. Watching for Jira modals...')
     observer.observe(document.body, { childList: true, subtree: true })
 })()
 

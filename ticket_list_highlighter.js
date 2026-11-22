@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.2
+// @version     1.2.3
 // @author      oggmancuc
 // @description Dynamically highlights rows in the Jira issue list when their status is "In Progress".
 // ==/UserScript==
@@ -60,9 +60,14 @@
 
     // Since Jira is a single-page app with virtual scrolling,
     // we observe the body for changes to catch new rows.
-    const observer = new MutationObserver((mutations) => {
-        highlightRows()
-    })
+    // Run at most once per frame: Jira mutates the DOM constantly
+    let scheduled = false
+    const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => { scheduled = false; highlightRows() })
+    }
+    const observer = new MutationObserver(schedule)
 
     observer.observe(document.body, {
         childList: true,

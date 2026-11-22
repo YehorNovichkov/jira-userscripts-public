@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.0.0
+// @version     1.0.1
 // @author      oggmancuc
 // @description Makes the Jira service desk ticket list table more compact and hides specified columns.
 // ==/UserScript==
@@ -200,10 +200,18 @@
     // ==========================================
     // MUTATION OBSERVER
     // ==========================================
-    const observer = new MutationObserver(() => {
+    function run() {
         applyColumnStyles();
         processRows();
-    });
+    }
+    // Run at most once per frame: Jira mutates the DOM constantly
+    let scheduled = false
+    const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => { scheduled = false; run() })
+    }
+    const observer = new MutationObserver(schedule);
 
     // Initialize
     injectCSS();
@@ -213,7 +221,6 @@
     });
 
     // Run once immediately
-    applyColumnStyles();
-    processRows();
+    run();
 
 })();

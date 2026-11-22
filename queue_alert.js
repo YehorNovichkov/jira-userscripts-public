@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.1.1
+// @version     1.1.2
 // @author      oggmancuc
 // @description Plays an alert sound when tickets appear in the "Waiting for Triage" queue. Compact icon button with an interactive settings dropdown to configure chime/alarm modes and preview sounds.
 // ==/UserScript==
@@ -485,7 +485,7 @@
 
     function updatePopoverContent() {
         const popover = document.getElementById(POPOVER_ID)
-        if (!popover) return
+        if (!popover || popover.style.display === 'none') return
 
         let badgeClass = 'gm-badge-neutral'
         let badgeText = 'MUTED'
@@ -617,8 +617,8 @@
             document.getElementById('gm-queue-refresh-popover')?.style.setProperty('display', 'none')
             document.getElementById('gm-queue-refresh-toggle')?.setAttribute('aria-expanded', 'false')
 
-            updatePopoverContent()
             popover.style.display = 'flex'
+            updatePopoverContent()
             btn?.setAttribute('aria-expanded', 'true')
         }
     }

@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.3
+// @version     1.2.4
 // @author      oggmancuc
 // @description Visually separates monitoring alerts from human requests, and cleans up long subject lines.
 // ==/UserScript==
@@ -82,7 +82,14 @@
     }
 
     // Handle virtual scrolling
-    const observer = new MutationObserver(processQueue)
+    // Run at most once per frame: Jira mutates the DOM constantly
+    let scheduled = false
+    const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        requestAnimationFrame(() => { scheduled = false; processQueue() })
+    }
+    const observer = new MutationObserver(schedule)
     observer.observe(document.body, { childList: true, subtree: true })
 
     processQueue()
