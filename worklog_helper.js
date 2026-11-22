@@ -3,15 +3,34 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.4.1
+// @version     1.5.1
 // @author      oggmancuc
-// @description Auto-expands the 'Log Work' modal and adds quick time buttons for logging.
+// @description Auto-expands the 'Log Work' modal, adds quick time buttons to it, and adds one-click log buttons under the status button.
 // ==/UserScript==
 
 ; (function () {
     'use strict'
 
     const TIME_OPTIONS = ['7m', '15m', '30m']
+    // Atlassian design tokens (--ds-*) follow the site's light/dark theme; the status button's own classes are hashed per build and change color per status, so they aren't reused.
+    const BTN_CLASS = 'gm-quick-log-btn'
+    const style = document.createElement('style')
+    style.textContent = `
+        .${BTN_CLASS} {
+            background: var(--ds-background-neutral-bold, #44546F);
+            color: var(--ds-text-inverse, #FFFFFF);
+            border: none;
+            border-radius: var(--ds-border-radius, 3px);
+            padding: 4px 12px;
+            cursor: pointer;
+            font: var(--ds-font-body-small, 600 12px/16px sans-serif);
+            font-weight: 600;
+        }
+        .${BTN_CLASS}:hover { background: var(--ds-background-neutral-bold-hovered, #2C3E5D); }
+        .${BTN_CLASS}:active { background: var(--ds-background-neutral-bold-pressed, #172B4D); }
+        .${BTN_CLASS}:disabled { cursor: default; opacity: 0.7; }
+    `
+    document.head.appendChild(style)
     const EXPAND_BTN_SELECTOR = 'button[data-testid*="log-work.next-button"]'
     const TIME_SPENT_SELECTORS = [
         '[data-testid="issue-transition.ui.modal.field-renderer.field.log-work-time-spent"]',
@@ -61,16 +80,7 @@
             const btn = document.createElement('button')
             btn.textContent = time
             btn.type = 'button'
-            btn.style.cssText = `
-                background: #F4F5F7;
-                border: 1px solid #DFE1E6;
-                border-radius: 3px;
-                padding: 4px 12px;
-                cursor: pointer;
-                font-size: 12px;
-                font-weight: 600;
-                color: #42526E;
-            `
+            btn.className = BTN_CLASS
 
             btn.addEventListener('click', (e) => {
                 e.preventDefault()
@@ -153,5 +163,65 @@
     })
 
     observer.observe(document.body, { childList: true, subtree: true })
+
+    // --- One-click worklog buttons under the status (workflow) button, via REST API ---
+    const STATUS_ANCHOR_SELECTOR = '[data-testid="ref-spotlight-target-status-and-approval-spotlight"]'
+
+    function getIssueKey() {
+        const url = location.href
+        const m = url.match(/\/browse\/([A-Z][A-Z0-9_]*-\d+)/)
+            || url.match(/\/projects\/[A-Z][A-Z0-9_]*\/queues\/.*\/([A-Z][A-Z0-9_]*-\d+)/)
+            || url.match(/[?&]selectedIssue=([A-Z][A-Z0-9_]*-\d+)/)
+        return m && m[1]
+    }
+
+    async function logWork(btn, time) {
+        const key = getIssueKey()
+        if (!key) return
+        const label = btn.textContent
+        btn.disabled = true // prevents double-logging on double click
+        btn.textContent = '…'
+        try {
+            const res = await fetch(`/rest/api/3/issue/${key}/worklog`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ timeSpent: time }),
+            })
+            if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+            btn.textContent = '✓'
+            btn.title = `Logged ${time} on ${key}`
+        } catch (err) {
+            console.error('[Worklog Helper] Failed to log work:', err)
+            btn.textContent = '✗'
+            btn.title = String(err)
+        }
+        setTimeout(() => { btn.textContent = label; btn.disabled = false }, 1500)
+    }
+
+    function injectStatusButtons() {
+        const anchor = document.querySelector(STATUS_ANCHOR_SELECTOR)
+        if (!anchor || anchor.nextElementSibling?.classList.contains('gm-quick-worklog-row') || !getIssueKey()) return
+
+        const row = document.createElement('div')
+        row.className = 'gm-quick-worklog-row'
+        row.style.cssText = 'display: flex; gap: 6px; margin: 8px 0;'
+        TIME_OPTIONS.forEach((time) => {
+            const btn = document.createElement('button')
+            btn.type = 'button'
+            btn.textContent = time
+            btn.title = `Log ${time} now`
+            btn.className = BTN_CLASS
+            btn.addEventListener('click', () => logWork(btn, time))
+            row.appendChild(btn)
+        })
+        anchor.after(row)
+    }
+
+    let statusScanQueued = false
+    new MutationObserver(() => {
+        if (statusScanQueued) return
+        statusScanQueued = true
+        requestAnimationFrame(() => { statusScanQueued = false; injectStatusButtons() })
+    }).observe(document.body, { childList: true, subtree: true })
 })()
 

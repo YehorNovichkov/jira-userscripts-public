@@ -65,7 +65,7 @@ Some scripts have settings at the top of the code that you are expected to edit 
     <br>
     <img src="assets/screenshots/highlight_compact.png" alt="Ticket List Highlighter Preview">
   </details>
-* **`worklog_helper.js`**: Auto-expands the 'Log Work' modal and adds quick time buttons for logging.
+* **`worklog_helper.js`**: Auto-expands the 'Log Work' modal, adds quick time buttons to it, and adds one-click buttons under the status button that log time instantly via the Jira REST API.
   <details>
     <summary>Preview</summary>
     <br>
