@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.8.0
+// @version     1.8.1
 // @author      oggmancuc
 // @description Hides main header with a toggle button to reveal it for editing, and hides clutter panels (Similar requests, Alert link, Agents) and the Agents button.
 // ==/UserScript==
@@ -19,6 +19,7 @@
         body.gm-hide-header [data-testid="issue-field-summary.ui.issue-field-summary-inline-edit--container"],
         body.gm-hide-header .css-bt2fdh,
         body.gm-hide-header [data-testid="issue-view-foundation.quick-add.quick-add-items-container"],
+        body.gm-hide-header div:has(> div > [data-testid="issue-view-foundation.quick-add.link-button.wrapper"]),
         /* Clutter panels: Similar requests & Alert link */
         body.gm-hide-header .gm-hidden-clutter,
         body.gm-hide-header div.css-rjtezs:has([id*="smart-related-issues-panel"]),
