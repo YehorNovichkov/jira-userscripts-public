@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.2.3
+// @version     1.2.4
 // @author      oggmancuc
 // @description Dynamically highlights rows in the Jira issue list when their status is "In Progress".
 // ==/UserScript==
@@ -44,14 +44,14 @@
                 // Apply highlight if it's not already there for THIS status
                 if (row.dataset.gmHighlighted !== status) {
                     row.style.backgroundColor = targetStyle.bg || ''
-                    row.style.borderLeft = targetStyle.border ? `4px solid ${targetStyle.border}` : ''
+                    row.style.boxShadow = targetStyle.border ? `inset 4px 0 0 ${targetStyle.border}` : '' // inset shadow paints over the row without taking layout space
                     row.dataset.gmHighlighted = status
                 }
             } else {
                 // If the status is not a target, remove the highlight if it exists.
                 if (row.dataset.gmHighlighted) {
                     row.style.backgroundColor = ''
-                    row.style.borderLeft = ''
+                    row.style.boxShadow = ''
                     delete row.dataset.gmHighlighted
                 }
             }

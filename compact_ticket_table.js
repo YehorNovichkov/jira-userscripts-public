@@ -3,7 +3,7 @@
 // @namespace   Violentmonkey Scripts
 // @match       https://*.atlassian.net/*
 // @grant       none
-// @version     1.0.1
+// @version     1.0.2
 // @author      oggmancuc
 // @description Makes the Jira service desk ticket list table more compact and hides specified columns.
 // ==/UserScript==
@@ -26,6 +26,10 @@
             "Dashboard Reminder Date": "110px",
             "Components": "600px"
         },
+
+        // Icon-only columns (Type, Priority): squeezed to the icon, padding stripped, icon never clipped
+        iconColumns: ["T", "P"],
+        iconColumnWidth: "28px",
 
         // Row height in pixels
         rowHeight: "42px"
@@ -106,7 +110,32 @@
                 `;
             }
 
-            const customWidthKey = Object.keys(CONFIG.customWidths).find(col => col.toLowerCase() === text);
+            if (CONFIG.iconColumns.some(col => col.toLowerCase() === text)) {
+                const width = CONFIG.iconColumnWidth;
+                styleContent += `
+                    div[role="columnheader"]:nth-child(${nth}),
+                    div[role="cell"]:nth-child(${nth}) {
+                        min-width: ${width} !important;
+                        max-width: ${width} !important;
+                        width: ${width} !important;
+                        flex-basis: ${width} !important;
+                        padding-left: 0 !important;
+                        padding-right: 0 !important;
+                        justify-content: center !important;
+                        overflow: visible !important;
+                    }
+                    div[role="columnheader"]:nth-child(${nth}) *,
+                    div[role="cell"]:nth-child(${nth}) * {
+                        padding-left: 0 !important;
+                        padding-right: 0 !important;
+                        margin-left: 0 !important;
+                        margin-right: 0 !important;
+                        overflow: visible !important;
+                    }
+                `;
+            }
+
+            const customWidthKey =Object.keys(CONFIG.customWidths).find(col => col.toLowerCase() === text);
             if (customWidthKey) {
                 const width = CONFIG.customWidths[customWidthKey];
                 styleContent += `
